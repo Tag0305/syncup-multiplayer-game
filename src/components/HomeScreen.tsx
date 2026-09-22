@@ -1,0 +1,69 @@
+import { ArrowRight, Copy, Sparkles, UsersRound } from "lucide-react";
+import { useState, type FormEvent } from "react";
+
+interface HomeScreenProps {
+  onCreate: (nickname: string) => Promise<void>;
+  onJoin: (nickname: string, roomCode: string) => Promise<void>;
+  busy: boolean;
+  error: string | null;
+}
+
+export function HomeScreen({ onCreate, onJoin, busy, error }: HomeScreenProps) {
+  const [nickname, setNickname] = useState("");
+  const [roomCode, setRoomCode] = useState("");
+
+  const submitJoin = (event: FormEvent) => {
+    event.preventDefault();
+    if (nickname.trim() && roomCode.trim().length === 6) void onJoin(nickname.trim(), roomCode.trim().toUpperCase());
+  };
+
+  return (
+    <main className="home-grid" id="home">
+      <section className="intro-panel">
+        <div className="eyebrow"><Sparkles size={16} /> Real-time party game</div>
+        <h1>How well do your minds <span>sync?</span></h1>
+        <p className="lede">Answer the same question. Match your friends. Find out who is on your wavelength.</p>
+        <div className="mini-flow" aria-label="How it works">
+          <span><strong>01</strong> Join</span><i /><span><strong>02</strong> Answer</span><i /><span><strong>03</strong> Match</span>
+        </div>
+        <div className="orbit" aria-hidden="true">
+          <div className="orbit-ring ring-one"><span>pizza</span></div>
+          <div className="orbit-ring ring-two"><span>pizza</span></div>
+          <div className="orbit-core"><UsersRound /><strong>+100</strong><small>IN SYNC</small></div>
+        </div>
+      </section>
+
+      <section className="entry-card" aria-labelledby="play-heading">
+        <div className="card-heading">
+          <p>READY WHEN YOU ARE</p>
+          <h2 id="play-heading">Enter the room</h2>
+        </div>
+        <label className="field">
+          <span>Your nickname</span>
+          <input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={20} placeholder="What should we call you?" autoComplete="nickname" />
+        </label>
+
+        {error && <div className="form-error" role="alert">{error}</div>}
+
+        <button className="primary-button" type="button" disabled={!nickname.trim() || busy} onClick={() => void onCreate(nickname.trim())}>
+          {busy ? "Connecting…" : <>Create a room <ArrowRight size={19} /></>}
+        </button>
+
+        <div className="divider"><span>or join friends</span></div>
+
+        <form onSubmit={submitJoin}>
+          <label className="field">
+            <span>Room code</span>
+            <div className="code-field">
+              <input value={roomCode} onChange={(event) => setRoomCode(event.target.value.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase())} placeholder="ABC234" aria-describedby="room-hint" />
+              <Copy size={18} aria-hidden="true" />
+            </div>
+          </label>
+          <p className="field-hint" id="room-hint">Six characters from your host</p>
+          <button className="secondary-button" disabled={!nickname.trim() || roomCode.length !== 6 || busy}>Join room</button>
+        </form>
+        <p className="privacy-note">No account needed. Just pick a name and play.</p>
+      </section>
+    </main>
+  );
+}
