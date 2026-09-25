@@ -12,6 +12,16 @@ import {
   nextPresenceDeadline,
   recordProcessedCommand,
 } from "../game/lobby";
+import {
+  GameError,
+  advancePhase,
+  allRequiredAnswersSubmitted,
+  handleScheduledTransition,
+  playAgain,
+  revealAnswers,
+  startGame,
+  submitAnswer,
+} from "../game/game-engine";
 import { toPublicSnapshot, type PrivateRoomState, type SocketTicketState } from "../game/room-state";
 import { clientCommandSchema, type ClientCommand, type ServerMessage } from "../protocol/messages";
 import { createSecret, hashSecret, secretsEqual } from "./security";
@@ -67,6 +77,19 @@ function playerTag(playerId: string): string {
   return `player:${playerId}`;
 }
 
+function upgradeState(state: PrivateRoomState): PrivateRoomState {
+  const legacy = state as PrivateRoomState & {
+    gamePlayerIds?: string[];
+    lastRoundPoints?: Record<string, number>;
+    scheduledTransition?: PrivateRoomState["scheduledTransition"];
+  };
+  legacy.schemaVersion = 2;
+  legacy.gamePlayerIds ??= [];
+  legacy.lastRoundPoints ??= {};
+  legacy.scheduledTransition ??= null;
+  return legacy;
+}
+
 export class RoomDurableObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -86,7 +109,8 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   async alarm(_alarmInfo?: AlarmInvocationInfo): Promise<void> {
     const now = Date.now();
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     if (!state) return;
 
     if (state.expiresAt <= now) {
@@ -102,8 +126,10 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
 
     const { changed, hostChanged } = expireDisconnectedPlayers(state, now);
+    const phaseChanged = handleScheduledTransition(state, now)
+      || (changed && state.phase === "question" && allRequiredAnswersSubmitted(state) && revealAnswers(state, now));
     await this.deleteExpiredTickets(now);
-    if (changed) {
+    if (changed || phaseChanged) {
       await this.ctx.storage.put(STATE_KEY, state);
       if (hostChanged) this.broadcast({ type: "HOST_CHANGED", hostPlayerId: state.hostPlayerId, eventSequence: state.eventSequence });
       this.broadcastSnapshot(state);
@@ -177,7 +203,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async joinRoom(request: Request): Promise<Response> {
     const input = await request.json<{ nickname: string }>();
     const now = Date.now();
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     assertRoomAvailable(state, now);
 
     const reconnectToken = createSecret();
@@ -201,7 +228,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async createSocketTicket(request: Request): Promise<Response> {
     const input = await request.json<SessionRequest>();
     const now = Date.now();
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     assertRoomAvailable(state, now);
     await this.verifySession(state, input);
     const ticket = createSecret(24);
@@ -214,7 +242,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async getAuthenticatedSnapshot(request: Request): Promise<Response> {
     const input = await request.json<SessionRequest>();
     const now = Date.now();
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     assertRoomAvailable(state, now);
     await this.verifySession(state, input);
     return Response.json({ snapshot: toPublicSnapshot(state, now) });
@@ -232,7 +261,8 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
     await this.ctx.storage.delete(key);
 
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     assertRoomAvailable(state, Date.now());
     markPlayerConnected(state, storedTicket.playerId, Date.now());
     await this.ctx.storage.put(STATE_KEY, state);
@@ -247,7 +277,8 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   private async processCommand(webSocket: WebSocket, socketPlayerId: string, command: ClientCommand): Promise<void> {
     const now = Date.now();
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     if (!state || state.status === "closed") {
       return this.send(webSocket, { type: "COMMAND_REJECTED", commandId: command.commandId, code: "ROOM_NOT_FOUND", message: "Room is no longer active." });
     }
@@ -284,6 +315,7 @@ export class RoomDurableObject extends DurableObject<Env> {
 
     if (command.type === "LEAVE_ROOM") {
       const result = leavePlayer(state, socketPlayerId, now);
+      if (state.phase === "question" && allRequiredAnswersSubmitted(state)) revealAnswers(state, now);
       recordProcessedCommand(state, command.commandId, socketPlayerId, now, "accepted");
       await this.ctx.storage.put(STATE_KEY, state);
       this.send(webSocket, { type: "COMMAND_ACCEPTED", commandId: command.commandId, eventSequence: state.eventSequence });
@@ -294,9 +326,34 @@ export class RoomDurableObject extends DurableObject<Env> {
       return;
     }
 
-    recordProcessedCommand(state, command.commandId, socketPlayerId, now, "rejected");
-    await this.ctx.storage.put(STATE_KEY, state);
-    return this.send(webSocket, { type: "COMMAND_REJECTED", commandId: command.commandId, code: "GAMEPLAY_DISABLED", message: "Gameplay is not enabled in this stage." });
+    try {
+      if (command.type === "START_GAME") {
+        startGame(state, socketPlayerId, now);
+      } else if (command.type === "SUBMIT_ANSWER") {
+        const shouldReveal = submitAnswer(state, socketPlayerId, command.answer, now);
+        if (shouldReveal) revealAnswers(state, now);
+      } else if (command.type === "ADVANCE_PHASE") {
+        if (state.hostPlayerId !== socketPlayerId) throw new GameError("HOST_ONLY", "Only the host can continue.");
+        if (!advancePhase(state, now)) throw new GameError("INVALID_PHASE", "The game cannot advance from this screen.");
+      } else if (command.type === "PLAY_AGAIN") {
+        playAgain(state, socketPlayerId, now);
+        state.playAgainCommandIds.push(command.commandId);
+        state.playAgainCommandIds = state.playAgainCommandIds.slice(-32);
+      } else {
+        throw new GameError("INVALID_PHASE", "Command is not available right now.");
+      }
+      recordProcessedCommand(state, command.commandId, socketPlayerId, now, "accepted");
+      await this.ctx.storage.put(STATE_KEY, state);
+      this.send(webSocket, { type: "COMMAND_ACCEPTED", commandId: command.commandId, eventSequence: state.eventSequence });
+      this.broadcastSnapshot(state);
+      await this.scheduleNextAlarm(state);
+    } catch (error) {
+      const code = error instanceof GameError ? error.code : "COMMAND_FAILED";
+      const message = error instanceof Error ? error.message : "Command could not be completed.";
+      recordProcessedCommand(state, command.commandId, socketPlayerId, now, "rejected");
+      await this.ctx.storage.put(STATE_KEY, state);
+      this.send(webSocket, { type: "COMMAND_REJECTED", commandId: command.commandId, code, message });
+    }
   }
 
   private async verifySession(state: PrivateRoomState, input: SessionRequest): Promise<void> {
@@ -309,7 +366,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async handleSocketGone(webSocket: WebSocket): Promise<void> {
     const playerId = this.playerIdForSocket(webSocket);
     if (!playerId) return;
-    const state = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
+    const state = storedState ? upgradeState(storedState) : undefined;
     if (!state || state.status === "closed") return;
     const changed = markPlayerDisconnected(state, playerId, Date.now());
     if (!changed) return;
@@ -348,7 +406,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async scheduleNextAlarm(state: PrivateRoomState): Promise<void> {
     const ticketStates = await this.ctx.storage.list<SocketTicketState>({ prefix: TICKET_PREFIX });
     const ticketDeadlines = [...ticketStates.values()].map((ticket) => ticket.expiresAt);
-    const deadlines = [state.expiresAt, nextPresenceDeadline(state), ...ticketDeadlines].filter((value): value is number => value !== null);
+    const deadlines = [state.expiresAt, nextPresenceDeadline(state), state.scheduledTransition?.deadline ?? null, ...ticketDeadlines]
+      .filter((value): value is number => value !== null);
     await this.ctx.storage.setAlarm(Math.min(...deadlines));
   }
 }

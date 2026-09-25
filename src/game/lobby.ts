@@ -63,7 +63,7 @@ export function createInitialRoomState(args: {
   now: number;
 }): PrivateRoomState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     roomId: args.roomId,
     roomCode: args.roomCode,
     status: "lobby",
@@ -81,6 +81,7 @@ export function createInitialRoomState(args: {
     selectedQuestionIds: [],
     usedQuestionIds: [],
     currentQuestion: null,
+    gamePlayerIds: [],
     eligiblePlayerIds: [],
     players: { [args.creator.playerId]: args.creator },
     answers: {},
@@ -88,6 +89,8 @@ export function createInitialRoomState(args: {
     processedCommands: {},
     scoredPhaseVersions: [],
     playAgainCommandIds: [],
+    lastRoundPoints: {},
+    scheduledTransition: null,
     eventSequence: 1,
   };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AnswerStatus, GamePhase, Presence, RoomStatus, RevealedAnswer } from "../game/room-state";
+import type { AnswerStatus, GamePhase, LeaderboardEntry, Presence, RoomStatus, RevealedAnswer } from "../game/room-state";
 
 const commandBase = z.object({
   commandId: z.string().uuid(),
@@ -55,7 +55,18 @@ export type PublicRoomSnapshot =
       revealedAnswers: RevealedAnswer[];
     })
   | (PublicSnapshotBase & {
-      phase: Exclude<GamePhase, "question" | "reveal">;
+      phase: "leaderboard";
+      phaseEndsAt: number | null;
+      leaderboard: LeaderboardEntry[];
+    })
+  | (PublicSnapshotBase & {
+      phase: "final";
+      phaseEndsAt: null;
+      leaderboard: LeaderboardEntry[];
+      winnerPlayerIds: string[];
+    })
+  | (PublicSnapshotBase & {
+      phase: Exclude<GamePhase, "question" | "reveal" | "leaderboard" | "final">;
       phaseEndsAt: number | null;
     });
 

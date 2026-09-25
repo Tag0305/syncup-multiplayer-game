@@ -1,54 +1,78 @@
 import { Crown, RotateCcw, Sparkles } from "lucide-react";
+import type { LeaderboardEntry } from "../game/room-state";
+import type { PublicRoomSnapshot } from "../protocol/messages";
 
-const ranking = [
-  { rank: 1, name: "You", score: 300, color: "mint" },
-  { rank: 2, name: "Leo", score: 200, color: "coral" },
-  { rank: 3, name: "Noah", score: 100, color: "blue" },
-];
+function Rankings({ entries, currentPlayerId }: { entries: LeaderboardEntry[]; currentPlayerId: string }) {
+  return <div className="ranking-list">{entries.map((player, index) => (
+    <div className={player.rank === 1 ? "leader" : ""} key={player.playerId}>
+      <b>{player.rank}</b><span className={`avatar ${index % 3 === 0 ? "mint" : index % 3 === 1 ? "coral" : "blue"}`}>{player.nickname[0]?.toUpperCase()}</span>
+      <strong>{player.nickname}{player.playerId === currentPlayerId ? " (you)" : ""}<small>{player.roundPoints > 0 ? `+${player.roundPoints} this round` : "No points this round"}</small></strong>
+      <em>{player.score} pts</em>
+    </div>
+  ))}</div>;
+}
 
-export function RevealScreen({ onContinue }: { onContinue: () => void }) {
+interface RevealProps {
+  snapshot: Extract<PublicRoomSnapshot, { phase: "reveal" }>;
+  currentPlayerId: string;
+  commandBusy: boolean;
+  onContinue: () => Promise<boolean>;
+}
+
+export function RevealScreen({ snapshot, currentPlayerId, commandBusy, onContinue }: RevealProps) {
+  const isHost = snapshot.hostPlayerId === currentPlayerId;
+  const hasMatch = snapshot.revealedAnswers.some((answer) => answer.matchSize >= 2);
   return (
     <main className="round-shell reveal-shell">
-      <div className="round-topline"><span>ROUND 1 RESULTS</span><strong className="sync-label"><Sparkles size={16} /> MATCH FOUND</strong></div>
+      <div className="round-topline"><span>ROUND {snapshot.roundNumber} RESULTS</span><strong className="sync-label"><Sparkles size={16} /> {hasMatch ? "MATCH FOUND" : "ALL UNIQUE"}</strong></div>
       <section className="reveal-card">
-        <p>Name something people pretend to understand</p>
-        <h1>Great minds think alike.</h1>
-        <div className="answer-grid">
-          <article className="matched"><span>You</span><strong>Crypto</strong><em>+100</em></article>
-          <article className="matched"><span>Leo</span><strong>crypto!</strong><em>+100</em></article>
-          <article><span>Noah</span><strong>Modern art</strong><em>+0</em></article>
-        </div>
-        <button className="primary-button compact" onClick={onContinue}>See standings →</button>
+        <p>{snapshot.question?.text}</p><h1>{hasMatch ? "Great minds think alike." : "Different minds this time."}</h1>
+        <div className="answer-grid">{snapshot.revealedAnswers.map((answer) => (
+          <article className={answer.matchSize >= 2 ? "matched" : ""} key={answer.playerId}>
+            <span>{answer.nickname}{answer.playerId === currentPlayerId ? " (you)" : ""}</span><strong>{answer.answer}</strong><em>+{answer.pointsAwarded}</em>
+            {answer.matchSize >= 2 && <small>{answer.matchSize} matched</small>}
+          </article>
+        ))}</div>
+        {isHost ? <button className="primary-button compact" disabled={commandBusy} onClick={() => void onContinue()}>See standings →</button> : <small className="waiting-copy">Waiting for the host · continues automatically</small>}
       </section>
     </main>
   );
 }
 
-export function LeaderboardScreen({ onContinue }: { onContinue: () => void }) {
+interface LeaderboardProps {
+  snapshot: Extract<PublicRoomSnapshot, { phase: "leaderboard" }>;
+  currentPlayerId: string;
+  commandBusy: boolean;
+  onContinue: () => Promise<boolean>;
+}
+
+export function LeaderboardScreen({ snapshot, currentPlayerId, commandBusy, onContinue }: LeaderboardProps) {
+  const isHost = snapshot.hostPlayerId === currentPlayerId;
+  const isLastRound = snapshot.roundNumber === snapshot.totalRounds;
   return (
-    <main className="round-shell leaderboard-shell">
-      <div className="round-topline"><span>AFTER ROUND 1</span><strong>4 rounds left</strong></div>
-      <section className="leaderboard-card">
-        <p className="kicker">CURRENT STANDINGS</p><h1>Leaderboard</h1>
-        <div className="ranking-list">
-          {ranking.map((player) => <div className={player.rank === 1 ? "leader" : ""} key={player.name}><b>{player.rank}</b><span className={`avatar ${player.color}`}>{player.name[0]}</span><strong>{player.name}</strong><em>{player.score} pts</em></div>)}
-        </div>
-        <button className="primary-button compact" onClick={onContinue}>Next round →</button>
-        <small>Moving on automatically in 15 seconds</small>
+    <main className="round-shell leaderboard-shell"><div className="round-topline"><span>AFTER ROUND {snapshot.roundNumber}</span><strong>{isLastRound ? "Final results next" : `${snapshot.totalRounds - snapshot.roundNumber} rounds left`}</strong></div>
+      <section className="leaderboard-card"><p className="kicker">CURRENT STANDINGS</p><h1>Leaderboard</h1><Rankings entries={snapshot.leaderboard} currentPlayerId={currentPlayerId} />
+        {isHost ? <button className="primary-button compact" disabled={commandBusy} onClick={() => void onContinue()}>{isLastRound ? "Final results" : "Next round"} →</button> : <small>Waiting for the host · moving on automatically</small>}
       </section>
     </main>
   );
 }
 
-export function FinalScreen({ onReplay }: { onReplay: () => void }) {
+interface FinalProps {
+  snapshot: Extract<PublicRoomSnapshot, { phase: "final" }>;
+  currentPlayerId: string;
+  commandBusy: boolean;
+  onReplay: () => Promise<boolean>;
+}
+
+export function FinalScreen({ snapshot, currentPlayerId, commandBusy, onReplay }: FinalProps) {
+  const winners = snapshot.leaderboard.filter((entry) => snapshot.winnerPlayerIds.includes(entry.playerId));
+  const isHost = snapshot.hostPlayerId === currentPlayerId;
+  const winnerText = winners.length > 1 ? `${winners.map((winner) => winner.nickname).join(" & ")} tie!` : `${winners[0]?.nickname ?? "No one"} wins!`;
   return (
-    <main className="round-shell final-shell">
-      <section className="winner-card">
-        <div className="crown"><Crown /></div><p>THE MOST IN SYNC</p><h1>You win!</h1><strong className="winning-score">1,100 points</strong>
-        <div className="stats-grid"><div><strong>4</strong><span>matched rounds</span></div><div><strong>67%</strong><span>room sync</span></div><div><strong>3</strong><span>best match</span></div></div>
-        <button className="primary-button compact" onClick={onReplay}><RotateCcw size={18} /> Play again</button>
-        <small>Same room. Same crew. Fresh questions.</small>
-      </section>
-    </main>
+    <main className="round-shell final-shell"><section className="winner-card"><div className="crown"><Crown /></div><p>{winners.length > 1 ? "SHARED WINNERS" : "THE MOST IN SYNC"}</p><h1>{winnerText}</h1><strong className="winning-score">{winners[0]?.score ?? 0} points</strong>
+      <Rankings entries={snapshot.leaderboard} currentPlayerId={currentPlayerId} />
+      {isHost ? <button className="primary-button compact" disabled={commandBusy || snapshot.players.length < 2} onClick={() => void onReplay()}><RotateCcw size={18} /> Play again</button> : <small>Waiting for the host to start another game.</small>}
+      <small>Same room. Same crew. Fresh questions.</small></section></main>
   );
 }

@@ -36,6 +36,16 @@ export interface RevealedAnswer {
   answer: string;
   matchSize: number;
   pointsAwarded: number;
+  normalizedGroup: string | null;
+}
+
+export interface LeaderboardEntry {
+  playerId: string;
+  nickname: string;
+  rank: number;
+  score: number;
+  roundPoints: number;
+  presence: Presence;
 }
 
 export interface RoundResult {
@@ -60,7 +70,7 @@ export interface SocketTicketState {
 }
 
 export interface PrivateRoomState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   roomId: string;
   roomCode: string;
   status: RoomStatus;
@@ -78,6 +88,7 @@ export interface PrivateRoomState {
   selectedQuestionIds: string[];
   usedQuestionIds: string[];
   currentQuestion: { id: string; text: string } | null;
+  gamePlayerIds: string[];
   eligiblePlayerIds: string[];
   players: Record<string, PlayerState>;
   answers: Record<string, AnswerState>;
@@ -85,7 +96,34 @@ export interface PrivateRoomState {
   processedCommands: Record<string, ProcessedCommand>;
   scoredPhaseVersions: number[];
   playAgainCommandIds: string[];
+  lastRoundPoints: Record<string, number>;
+  scheduledTransition: {
+    kind: "answer_deadline" | "reveal_fallback" | "leaderboard_fallback";
+    deadline: number;
+    phaseVersion: number;
+  } | null;
   eventSequence: number;
+}
+
+export function buildLeaderboard(state: PrivateRoomState): LeaderboardEntry[] {
+  const ordered = state.gamePlayerIds
+    .map((playerId) => state.players[playerId])
+    .filter((player): player is PlayerState => Boolean(player))
+    .sort((a, b) => b.score - a.score || a.joinOrder - b.joinOrder);
+  let previousScore: number | null = null;
+  let rank = 0;
+  return ordered.map((player, index) => {
+    if (player.score !== previousScore) rank = index + 1;
+    previousScore = player.score;
+    return {
+      playerId: player.playerId,
+      nickname: player.nickname,
+      rank,
+      score: player.score,
+      roundPoints: state.lastRoundPoints[player.playerId] ?? 0,
+      presence: player.presence,
+    };
+  });
 }
 
 /**
@@ -144,6 +182,28 @@ export function toPublicSnapshot(state: PrivateRoomState, serverNow: number): Pu
       question: state.currentQuestion,
       revealedAnswers: state.roundResults.at(-1)?.revealedAnswers ?? [],
       phaseEndsAt: state.phaseEndsAt,
+    };
+  }
+
+
+  if (state.phase === "leaderboard") {
+    return {
+      ...common,
+      phase: "leaderboard",
+      phaseEndsAt: state.phaseEndsAt,
+      leaderboard: buildLeaderboard(state),
+    };
+  }
+
+  if (state.phase === "final") {
+    const leaderboard = buildLeaderboard(state);
+    const winningScore = leaderboard[0]?.score ?? 0;
+    return {
+      ...common,
+      phase: "final",
+      phaseEndsAt: null,
+      leaderboard,
+      winnerPlayerIds: leaderboard.filter((entry) => entry.score === winningScore).map((entry) => entry.playerId),
     };
   }
 

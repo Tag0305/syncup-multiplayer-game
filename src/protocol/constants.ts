@@ -7,6 +7,7 @@ export const GAME_CONFIG = {
   maxAnswerLength: 60,
   roomCodeLength: 6,
   roomMaxLifetimeMs: 24 * 60 * 60 * 1_000,
+  revealDurationMs: 8_000,
   hostFallbackMs: 15_000,
 } as const;
 

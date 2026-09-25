@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PublicRoomSnapshot, ServerMessage } from "../protocol/messages";
+import type { ClientCommand, PublicRoomSnapshot, ServerMessage } from "../protocol/messages";
 import { createRoom, createSocketTicket, joinRoom, RoomApiError, socketUrl } from "./room-client";
 import { clearSession, loadSession, saveSession, type PlayerSession } from "./session";
 
@@ -11,6 +11,7 @@ export function useRoomLobby() {
   const [connectionState, setConnectionState] = useState<ConnectionState>(session ? "connecting" : "idle");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [commandBusy, setCommandBusy] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -116,13 +117,13 @@ export function useRoomLobby() {
     };
   }, [session]);
 
-  const sendCommand = useCallback((type: "REQUEST_SNAPSHOT" | "LEAVE_ROOM"): Promise<boolean> => {
+  const sendCommand = useCallback((type: ClientCommand["type"], payload: Record<string, unknown> = {}): Promise<boolean> => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN || !session || !snapshot) return Promise.resolve(false);
     const commandId = crypto.randomUUID();
     return new Promise((resolve) => {
       pendingRef.current.set(commandId, resolve);
-      socket.send(JSON.stringify({ type, commandId, roomCode: session.roomCode, playerId: session.playerId, expectedPhaseVersion: snapshot.phaseVersion }));
+      socket.send(JSON.stringify({ type, commandId, roomCode: session.roomCode, playerId: session.playerId, expectedPhaseVersion: snapshot.phaseVersion, ...payload }));
       window.setTimeout(() => {
         if (!pendingRef.current.has(commandId)) return;
         pendingRef.current.delete(commandId);
@@ -142,5 +143,25 @@ export function useRoomLobby() {
     setError(null);
   }, [sendCommand]);
 
-  return { session, snapshot, connectionState, error, busy, create, join, leave };
+  const runGameCommand = useCallback(async (type: "START_GAME" | "ADVANCE_PHASE" | "PLAY_AGAIN") => {
+    setCommandBusy(true);
+    setError(null);
+    try { return await sendCommand(type); }
+    finally { setCommandBusy(false); }
+  }, [sendCommand]);
+
+  const submitAnswer = useCallback(async (answer: string) => {
+    setCommandBusy(true);
+    setError(null);
+    try { return await sendCommand("SUBMIT_ANSWER", { answer }); }
+    finally { setCommandBusy(false); }
+  }, [sendCommand]);
+
+  return {
+    session, snapshot, connectionState, error, busy, commandBusy, create, join, leave,
+    startGame: () => runGameCommand("START_GAME"),
+    advancePhase: () => runGameCommand("ADVANCE_PHASE"),
+    playAgain: () => runGameCommand("PLAY_AGAIN"),
+    submitAnswer,
+  };
 }

@@ -79,8 +79,8 @@ async function connect(session: PlayerSession): Promise<SocketClient> {
   return client;
 }
 
-function command(session: PlayerSession, type: "REQUEST_SNAPSHOT" | "LEAVE_ROOM", commandId = crypto.randomUUID(), phaseVersion = 0) {
-  return { type, commandId, roomCode: session.roomCode, playerId: session.playerId, expectedPhaseVersion: phaseVersion };
+function command(session: PlayerSession, type: "REQUEST_SNAPSHOT" | "LEAVE_ROOM" | "START_GAME" | "SUBMIT_ANSWER" | "ADVANCE_PHASE" | "PLAY_AGAIN", commandId = crypto.randomUUID(), phaseVersion = 0, extra: Record<string, unknown> = {}) {
+  return { type, commandId, roomCode: session.roomCode, playerId: session.playerId, expectedPhaseVersion: phaseVersion, ...extra };
 }
 
 beforeAll(async () => {
@@ -204,5 +204,121 @@ describe("real multiplayer lobby", () => {
       reconnectToken: second.session.reconnectToken,
     });
     expect(secondSnapshot.data.snapshot.players.map((player) => player.nickname)).toEqual(["Noah"]);
+  });
+});
+
+describe("authoritative multiplayer game", () => {
+  it("enforces host-only start, minimum players, and rejects late joins", async () => {
+    const soloRoom = await create("Solo");
+    const soloHost = await connect(soloRoom.session);
+    const soloStartId = crypto.randomUUID();
+    soloHost.send(command(soloRoom.session, "START_GAME", soloStartId, soloRoom.snapshot.phaseVersion));
+    const minimum = await soloHost.next((message) => message.type === "COMMAND_REJECTED" && message.commandId === soloStartId);
+    expect(minimum.type === "COMMAND_REJECTED" && minimum.code).toBe("NOT_ENOUGH_PLAYERS");
+
+    const room = await create("Maya");
+    const host = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    const guest = await connect(joined.data.session);
+    const lobby = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+    if (lobby.type !== "ROOM_SNAPSHOT") throw new Error("Expected lobby snapshot");
+
+    const guestStartId = crypto.randomUUID();
+    guest.send(command(joined.data.session, "START_GAME", guestStartId, lobby.snapshot.phaseVersion));
+    const denied = await guest.next((message) => message.type === "COMMAND_REJECTED" && message.commandId === guestStartId);
+    expect(denied.type === "COMMAND_REJECTED" && denied.code).toBe("HOST_ONLY");
+
+    const startId = crypto.randomUUID();
+    host.send(command(room.session, "START_GAME", startId, lobby.snapshot.phaseVersion));
+    const started = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    expect(started.type === "ROOM_SNAPSHOT" && started.snapshot.roundNumber).toBe(1);
+    const late = await join(room.roomCode, "Late Player");
+    expect(late.status).toBe(409);
+    expect(late.data.error).toBe("GAME_ALREADY_STARTED");
+  });
+
+  it("keeps answers private, reveals simultaneously, scores on the server, and deduplicates submissions", async () => {
+    const room = await create("Maya");
+    const host = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    const guest = await connect(joined.data.session);
+    const lobby = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+    if (lobby.type !== "ROOM_SNAPSHOT") throw new Error("Expected lobby snapshot");
+    host.send(command(room.session, "START_GAME", crypto.randomUUID(), lobby.snapshot.phaseVersion));
+    const question = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    if (question.type !== "ROOM_SNAPSHOT" || question.snapshot.phase !== "question") throw new Error("Expected question snapshot");
+
+    const answerId = crypto.randomUUID();
+    host.send(command(room.session, "SUBMIT_ANSWER", answerId, question.snapshot.phaseVersion, { answer: " Check phone! " }));
+    const progress = await guest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question" && message.snapshot.submissionProgress.submittedCount === 1);
+    expect(JSON.stringify(progress)).not.toContain("Check phone");
+    host.send(command(room.session, "SUBMIT_ANSWER", answerId, question.snapshot.phaseVersion, { answer: "Different" }));
+    const duplicate = await host.next((message) => message.type === "COMMAND_ACCEPTED" && message.commandId === answerId && message.duplicate === true);
+    expect(duplicate.type).toBe("COMMAND_ACCEPTED");
+
+    guest.send(command(joined.data.session, "SUBMIT_ANSWER", crypto.randomUUID(), question.snapshot.phaseVersion, { answer: "check phone" }));
+    const reveal = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "reveal");
+    if (reveal.type !== "ROOM_SNAPSHOT" || reveal.snapshot.phase !== "reveal") throw new Error("Expected reveal snapshot");
+    expect(reveal.snapshot.revealedAnswers.map((answer) => answer.pointsAwarded)).toEqual([100, 100]);
+    expect(reveal.snapshot.players.map((player) => player.score)).toEqual([100, 100]);
+  });
+
+  it("restores the same current-game snapshot after a temporary disconnect", async () => {
+    const room = await create("Maya");
+    const host = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    const guest = await connect(joined.data.session);
+    const lobby = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+    if (lobby.type !== "ROOM_SNAPSHOT") throw new Error("Expected lobby snapshot");
+    host.send(command(room.session, "START_GAME", crypto.randomUUID(), lobby.snapshot.phaseVersion));
+    const question = await guest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    if (question.type !== "ROOM_SNAPSHOT" || question.snapshot.phase !== "question") throw new Error("Expected question snapshot");
+    const questionId = question.snapshot.question.id;
+    guest.close();
+    await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.some((player) => player.playerId === joined.data.session.playerId && player.presence === "reconnecting"));
+    const restoredGuest = await connect(joined.data.session);
+    restoredGuest.send(command(joined.data.session, "REQUEST_SNAPSHOT", crypto.randomUUID(), question.snapshot.phaseVersion));
+    const restored = await restoredGuest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    expect(restored.type === "ROOM_SNAPSHOT" && restored.snapshot.phase === "question" && restored.snapshot.question.id).toBe(questionId);
+  });
+
+  it("completes five synchronized rounds and makes Play Again idempotent", async () => {
+    const room = await create("Maya");
+    const host = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    const guest = await connect(joined.data.session);
+    const lobby = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+    if (lobby.type !== "ROOM_SNAPSHOT") throw new Error("Expected lobby snapshot");
+    host.send(command(room.session, "START_GAME", crypto.randomUUID(), lobby.snapshot.phaseVersion));
+    let questionMessage = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+
+    for (let round = 1; round <= 5; round += 1) {
+      if (questionMessage.type !== "ROOM_SNAPSHOT" || questionMessage.snapshot.phase !== "question") throw new Error("Expected question snapshot");
+      expect(questionMessage.snapshot.roundNumber).toBe(round);
+      const version = questionMessage.snapshot.phaseVersion;
+      host.send(command(room.session, "SUBMIT_ANSWER", crypto.randomUUID(), version, { answer: "Same answer" }));
+      guest.send(command(joined.data.session, "SUBMIT_ANSWER", crypto.randomUUID(), version, { answer: "same answer!" }));
+      const reveal = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "reveal" && message.snapshot.roundNumber === round);
+      if (reveal.type !== "ROOM_SNAPSHOT" || reveal.snapshot.phase !== "reveal") throw new Error("Expected reveal snapshot");
+      host.send(command(room.session, "ADVANCE_PHASE", crypto.randomUUID(), reveal.snapshot.phaseVersion));
+      const leaderboard = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "leaderboard" && message.snapshot.roundNumber === round);
+      if (leaderboard.type !== "ROOM_SNAPSHOT" || leaderboard.snapshot.phase !== "leaderboard") throw new Error("Expected leaderboard snapshot");
+      host.send(command(room.session, "ADVANCE_PHASE", crypto.randomUUID(), leaderboard.snapshot.phaseVersion));
+      if (round < 5) {
+        questionMessage = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question" && message.snapshot.roundNumber === round + 1);
+      } else {
+        const final = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "final");
+        if (final.type !== "ROOM_SNAPSHOT" || final.snapshot.phase !== "final") throw new Error("Expected final snapshot");
+        expect(final.snapshot.winnerPlayerIds).toHaveLength(2);
+        expect(final.snapshot.leaderboard.map((entry) => entry.score)).toEqual([500, 500]);
+        const replayId = crypto.randomUUID();
+        host.send(command(room.session, "PLAY_AGAIN", replayId, final.snapshot.phaseVersion));
+        const replay = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question" && message.snapshot.roundNumber === 1);
+        if (replay.type !== "ROOM_SNAPSHOT") throw new Error("Expected replay snapshot");
+        host.send(command(room.session, "PLAY_AGAIN", replayId, final.snapshot.phaseVersion));
+        const duplicate = await host.next((message) => message.type === "COMMAND_ACCEPTED" && message.commandId === replayId && message.duplicate === true);
+        expect(duplicate.type).toBe("COMMAND_ACCEPTED");
+      }
+    }
   });
 });

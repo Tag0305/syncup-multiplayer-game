@@ -7,13 +7,15 @@ interface LobbyScreenProps {
   currentPlayerId: string;
   connectionState: ConnectionState;
   onLeave: () => Promise<void>;
+  onStart: () => Promise<boolean>;
+  commandBusy: boolean;
 }
 
 function presenceLabel(presence: "connected" | "reconnecting" | "left") {
   return presence === "connected" ? "Ready" : presence === "reconnecting" ? "Reconnecting" : "Left";
 }
 
-export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeave }: LobbyScreenProps) {
+export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeave, onStart, commandBusy }: LobbyScreenProps) {
   const copyCode = () => void navigator.clipboard.writeText(snapshot.roomCode);
   const shareRoom = async () => {
     const text = `Join my SyncUp room with code ${snapshot.roomCode}`;
@@ -25,6 +27,8 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
     }
   };
   const connectionText = connectionState === "connected" ? "Connected" : connectionState === "offline" ? "Offline" : "Reconnecting";
+  const isHost = snapshot.hostPlayerId === currentPlayerId;
+  const canStart = isHost && snapshot.players.length >= 2 && connectionState === "connected";
 
   return (
     <main className="game-shell">
@@ -64,8 +68,8 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
           <div className="pulse-mark" aria-hidden="true"><i /><i /><i /></div>
           <h2>{snapshot.players.length < 2 ? "Invite a friend" : "Everyone's here?"}</h2>
           <p>{snapshot.players.length < 2 ? "Share the room code to bring another player into the lobby." : "The room is live and everyone is synchronized."}</p>
-          <button className="primary-button" type="button" disabled title="Gameplay will be enabled in the next build">Start game <span>→</span></button>
-          <small>Game rounds are coming next</small>
+          <button className="primary-button" type="button" disabled={!canStart || commandBusy} onClick={() => void onStart()}>{commandBusy ? "Starting…" : "Start game"} <span>→</span></button>
+          <small>{!isHost ? "The host will start the game" : snapshot.players.length < 2 ? "At least 2 players are needed" : "5 rounds · 45 seconds each"}</small>
         </aside>
       </section>
     </main>

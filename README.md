@@ -1,6 +1,6 @@
 # SyncUp
 
-Real-time social matching game for 2–8 players. Phase 3 adds authoritative room creation and joining, anonymous reconnectable identities, WebSocket lobby synchronization, a 30-second reconnection window, explicit leave, and deterministic host transfer. The five-round game engine is intentionally not enabled yet.
+Real-time social matching game for 2–8 players. SyncUp includes authoritative room creation and joining, anonymous reconnectable identities, WebSocket synchronization, a 30-second reconnection window, deterministic host transfer, and a complete five-round matching game.
 
 ## Requirements
 
@@ -67,4 +67,4 @@ The deployment uses `wrangler.jsonc`, including the `ASSETS` binding, SPA fallba
 
 ## Current scope
 
-Room and lobby multiplayer are live. `START_GAME`, answer submission, timers, scoring, rounds, and Play Again remain server-disabled for Phase 4.
+The complete Phase 4 game is enabled: host-only start, five unique questions, server-authoritative 45-second answer phases, simultaneous reveal, exact normalized matching, synchronized leaderboards, tied winners, host/fallback progression, and Play Again in the same room.

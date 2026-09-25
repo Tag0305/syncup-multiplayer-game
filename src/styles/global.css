@@ -92,10 +92,23 @@ footer { max-width:1180px; margin:auto; min-height:66px; display:flex; justify-c
 @keyframes pulse { 0%,100%{transform:scale(.8);opacity:.45}50%{transform:scale(1);opacity:1} }
 @keyframes player-in { from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none} }
 @keyframes spin { to{transform:rotate(360deg)} }
+@keyframes timer-pulse { to{transform:scale(1.06);filter:brightness(1.3)} }
+.timer-urgent { animation: timer-pulse .8s ease-in-out infinite alternate; }
+.answer-grid { grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+.answer-grid strong { overflow-wrap:anywhere; }
+.answer-grid small { color:var(--mint);font-size:.66rem; }
+.waiting-copy { display:block;color:var(--muted);margin-top:25px; }
+.ranking-list strong { display:grid;gap:3px; }
+.ranking-list strong small { color:var(--muted);font-size:.62rem;font-weight:600; }
+.game-error { position:fixed;z-index:20;left:50%;bottom:24px;transform:translateX(-50%);width:min(520px,calc(100% - 32px));color:#ffd0cc;background:#29171c;border:1px solid rgba(255,123,111,.4);box-shadow:0 18px 50px rgba(0,0,0,.35);border-radius:12px;padding:13px 16px;text-align:center;font-size:.82rem; }
 @media (max-width: 840px) {
   .home-grid { grid-template-columns:1fr; gap:42px; padding-top:38px; }.intro-panel h1{font-size:clamp(3.2rem,14vw,5.8rem)}.orbit{display:none}.entry-card{max-width:590px;width:100%;margin:auto}.lobby-layout{grid-template-columns:1fr}.lobby-aside{padding-top:0}.answer-grid{grid-template-columns:1fr}.submission-strip{align-items:flex-start;gap:9px;flex-direction:column}.submission-strip p{line-height:1.5}
 }
 @media (max-width: 560px) {
   .topbar{height:68px}.home-grid{padding:30px 0 50px}.intro-panel h1{font-size:3.45rem}.lede{margin:20px 0}.mini-flow{gap:8px}.mini-flow i{width:13px}.entry-card{border-radius:18px}.game-shell,.round-shell{padding-top:24px;min-height:calc(100vh - 120px)}.room-banner{align-items:flex-start;gap:15px;flex-direction:column}.room-actions{width:100%;flex-wrap:wrap}.room-actions button{flex:1}.lobby-layout{margin-top:32px}.section-title h1{font-size:2.3rem}.question-card,.reveal-card,.leaderboard-card,.winner-card{padding:32px 20px}.question-card h1,.reveal-card h1{font-size:2.3rem}.stats-grid{grid-template-columns:1fr}.round-topline{gap:10px}.sync-label{font-size:.65rem!important}footer{display:none}
+}
+@media (max-width: 560px) {
+  .ranking-list > div { grid-template-columns:24px 36px 1fr auto;padding:10px 9px;gap:8px; }
+  .ranking-list em { font-size:.75rem; }
 }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important} }
