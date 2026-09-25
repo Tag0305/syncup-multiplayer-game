@@ -18,4 +18,14 @@ describe("SyncUp room entry", () => {
     fireEvent.click(screen.getByRole("button", { name: /create a room/i }));
     expect(onCreate).toHaveBeenCalledWith("Tagore");
   });
+
+  it("opens a compact keyboard-dismissible How to Play dialog", () => {
+    render(<HomeScreen onCreate={vi.fn()} onJoin={vi.fn()} busy={false} error={null} />);
+    fireEvent.click(screen.getByRole("button", { name: /how to play/i }));
+    expect(screen.getByRole("dialog", { name: /how to play/i })).toBeInTheDocument();
+    expect(screen.getByText(/2–8 players/i)).toBeInTheDocument();
+    expect(screen.getByText(/300 each/i)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: /how to play/i })).not.toBeInTheDocument();
+  });
 });

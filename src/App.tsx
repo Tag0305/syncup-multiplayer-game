@@ -28,6 +28,9 @@ export default function App() {
       {room.session && room.snapshot?.phase === "reveal" && <RevealScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onContinue={room.advancePhase} />}
       {room.session && room.snapshot?.phase === "leaderboard" && <LeaderboardScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onContinue={room.advancePhase} />}
       {room.session && room.snapshot?.phase === "final" && <FinalScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onReplay={room.playAgain} />}
+      {room.session && room.snapshot?.phase !== "lobby" && room.connectionState !== "connected" && (
+        <div className="connection-notice" role="status" aria-live="polite">Connection interrupted. Reconnecting to your game…</div>
+      )}
       {room.session && room.error && <div className="game-error" role="alert">{room.error}</div>}
       <footer><span>SYNCUP</span><p>Match minds. Score together.</p></footer>
     </div>

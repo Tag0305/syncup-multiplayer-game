@@ -1,6 +1,8 @@
-import { Check, Copy, LogOut, Share2, Signal, SignalZero, UserRound, UsersRound, Wifi } from "lucide-react";
+import { Check, CircleHelp, Copy, LogOut, Share2, Signal, SignalZero, UserRound, UsersRound, Wifi } from "lucide-react";
+import { useState } from "react";
 import type { ConnectionState } from "../api/useRoomLobby";
 import type { PublicRoomSnapshot } from "../protocol/messages";
+import { HowToPlay } from "./HowToPlay";
 
 interface LobbyScreenProps {
   snapshot: PublicRoomSnapshot;
@@ -16,7 +18,13 @@ function presenceLabel(presence: "connected" | "reconnecting" | "left") {
 }
 
 export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeave, onStart, commandBusy }: LobbyScreenProps) {
-  const copyCode = () => void navigator.clipboard.writeText(snapshot.roomCode);
+  const [copied, setCopied] = useState(false);
+  const [showHowTo, setShowHowTo] = useState(false);
+  const copyCode = async () => {
+    await navigator.clipboard.writeText(snapshot.roomCode);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_500);
+  };
   const shareRoom = async () => {
     const text = `Join my SyncUp room with code ${snapshot.roomCode}`;
     try {
@@ -32,14 +40,15 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
 
   return (
     <main className="game-shell">
-      <div className={`connection-pill ${connectionState !== "connected" ? "connection-warning" : ""}`}>
+      <div className={`connection-pill ${connectionState !== "connected" ? "connection-warning" : ""}`} role="status" aria-live="polite">
         {connectionState === "connected" ? <Signal size={14} /> : <SignalZero size={14} />} {connectionText}
       </div>
       <section className="room-banner">
         <div><span>ROOM CODE</span><strong>{snapshot.roomCode}</strong></div>
         <div className="room-actions">
-          <button className="small-button" type="button" onClick={copyCode}><Copy size={16} /> Copy</button>
+          <button className="small-button" type="button" onClick={() => void copyCode()} aria-label="Copy room code">{copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Copied" : "Copy"}</button>
           <button className="small-button" type="button" onClick={() => void shareRoom()}><Share2 size={16} /> Share</button>
+          <button className="small-button" type="button" onClick={() => setShowHowTo(true)}><CircleHelp size={16} /> Rules</button>
           <button className="small-button leave-button" type="button" onClick={() => void onLeave()}><LogOut size={16} /> Leave</button>
         </div>
       </section>
@@ -57,7 +66,7 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
                   <strong>{player.nickname}{player.playerId === currentPlayerId ? " (you)" : ""}</strong>
                   <small><i className={`presence-dot ${player.presence}`} />{presenceLabel(player.presence)}</small>
                 </div>
-                {player.role === "host" && <em>HOST</em>}
+                <span className="player-role-slot">{player.role === "host" && <em>HOST</em>}</span>
                 {player.presence === "connected" ? <Check className="ready-check" size={18} aria-label="Connected" /> : <Wifi className="reconnect-icon" size={18} aria-label="Reconnecting" />}
               </article>
             ))}
@@ -68,10 +77,11 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
           <div className="pulse-mark" aria-hidden="true"><i /><i /><i /></div>
           <h2>{snapshot.players.length < 2 ? "Invite a friend" : "Everyone's here?"}</h2>
           <p>{snapshot.players.length < 2 ? "Share the room code to bring another player into the lobby." : "The room is live and everyone is synchronized."}</p>
-          <button className="primary-button" type="button" disabled={!canStart || commandBusy} onClick={() => void onStart()}>{commandBusy ? "Starting…" : "Start game"} <span>→</span></button>
+          <button className="primary-button" type="button" aria-busy={commandBusy} disabled={!canStart || commandBusy} onClick={() => void onStart()}>{commandBusy ? "Starting…" : "Start game"} <span>→</span></button>
           <small>{!isHost ? "The host will start the game" : snapshot.players.length < 2 ? "At least 2 players are needed" : "5 rounds · 45 seconds each"}</small>
         </aside>
       </section>
+      {showHowTo && <HowToPlay onClose={() => setShowHowTo(false)} />}
     </main>
   );
 }

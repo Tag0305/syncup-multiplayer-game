@@ -35,7 +35,7 @@ export function QuestionScreen({ snapshot, currentPlayerId, connectionState, com
 
   return (
     <main className="round-shell">
-      <div className="round-topline"><span>ROUND {snapshot.roundNumber} OF {snapshot.totalRounds}</span><div className={`timer ${seconds <= 10 ? "timer-urgent" : ""}`}><Clock3 size={18} /><strong>0:{String(seconds).padStart(2, "0")}</strong></div></div>
+      <div className="round-topline"><span>ROUND {snapshot.roundNumber} OF {snapshot.totalRounds}</span><div className={`timer ${seconds <= 10 ? "timer-urgent" : ""}`} role="timer" aria-label={`${seconds} seconds remaining`}><Clock3 size={18} /><strong>0:{String(seconds).padStart(2, "0")}</strong></div></div>
       <div className="round-progress"><i style={{ width: `${snapshot.roundNumber / snapshot.totalRounds * 100}%` }} /></div>
       <section className="question-card">
         <div className="question-number">{String(snapshot.roundNumber).padStart(2, "0")}</div>
@@ -43,14 +43,14 @@ export function QuestionScreen({ snapshot, currentPlayerId, connectionState, com
         <h1>{submitted ? "Answer locked." : "What comes to mind?"}</h1>
         <label className="answer-field">
           <span className="sr-only">Your answer</span>
-          <input value={answer} disabled={submitted || commandBusy} onChange={(event) => setAnswer(event.target.value.slice(0, 60))} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} placeholder="Type your answer…" autoFocus />
-          <small>{answer.length}/60</small>
+          <input value={answer} disabled={submitted || commandBusy} maxLength={60} aria-describedby="answer-limit" onChange={(event) => setAnswer(event.target.value.slice(0, 60))} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} placeholder="Type your answer…" autoFocus />
+          <small id="answer-limit">{answer.length}/60</small>
         </label>
         <button className="primary-button" disabled={!answer.trim() || submitted || commandBusy || connectionState !== "connected"} onClick={() => void submit()}>
           {submitted ? <><CheckCircle2 size={19} /> Answer locked</> : connectionState !== "connected" ? <><WifiOff size={18} /> Reconnecting…</> : <>Lock it in <Send size={18} /></>}
         </button>
       </section>
-      <div className="submission-strip"><span><i className="submitted-dot" /> {snapshot.submissionProgress.submittedCount} of {snapshot.submissionProgress.eligibleCount} answered</span><p>Your answer stays private until everyone is ready.</p></div>
+      <div className="submission-strip" aria-live="polite"><span><i className="submitted-dot" /> {snapshot.submissionProgress.submittedCount} of {snapshot.submissionProgress.eligibleCount} answered</span><p>Your answer stays private until everyone is ready.</p></div>
     </main>
   );
 }

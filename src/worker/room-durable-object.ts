@@ -91,6 +91,8 @@ function upgradeState(state: PrivateRoomState): PrivateRoomState {
 }
 
 export class RoomDurableObject extends DurableObject<Env> {
+  private readonly finalizedSockets = new WeakSet<WebSocket>();
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     try {
@@ -364,6 +366,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   private async handleSocketGone(webSocket: WebSocket): Promise<void> {
+    if (this.finalizedSockets.has(webSocket)) return;
+    this.finalizedSockets.add(webSocket);
     const playerId = this.playerIdForSocket(webSocket);
     if (!playerId) return;
     const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);

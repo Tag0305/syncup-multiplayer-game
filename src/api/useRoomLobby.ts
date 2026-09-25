@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientCommand, PublicRoomSnapshot, ServerMessage } from "../protocol/messages";
-import { createRoom, createSocketTicket, joinRoom, RoomApiError, socketUrl } from "./room-client";
+import { createRoom, createSocketTicket, fetchRoomSnapshot, joinRoom, RoomApiError, socketUrl } from "./room-client";
 import { clearSession, loadSession, saveSession, type PlayerSession } from "./session";
 
 export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "offline";
@@ -15,8 +15,19 @@ export function useRoomLobby() {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
+  const connectionGenerationRef = useRef(0);
   const leavingRef = useRef(false);
   const pendingRef = useRef(new Map<string, (accepted: boolean) => void>());
+
+  const friendlyError = useCallback((caught: unknown, fallback: string) => {
+    if (caught instanceof RoomApiError) {
+      if (caught.code === "INVALID_SESSION") return "Your reconnect window expired. Rejoin the room with your nickname.";
+      if (caught.code === "ROOM_NOT_FOUND") return "That room could not be found. Check the code and try again.";
+      if (caught.code === "ROOM_EXPIRED") return "That room has expired. Create a new room to keep playing.";
+      return caught.message;
+    }
+    return caught instanceof TypeError ? "Could not reach SyncUp. Check your connection and try again." : fallback;
+  }, []);
 
   const acceptSession = useCallback((nextSession: PlayerSession, initialSnapshot: PublicRoomSnapshot) => {
     saveSession(nextSession);
@@ -33,11 +44,11 @@ export function useRoomLobby() {
       const result = await createRoom(nickname);
       acceptSession(result.session, result.snapshot);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create the room.");
+      setError(friendlyError(caught, "Could not create the room. Please try again."));
     } finally {
       setBusy(false);
     }
-  }, [acceptSession]);
+  }, [acceptSession, friendlyError]);
 
   const join = useCallback(async (nickname: string, roomCode: string) => {
     setBusy(true);
@@ -46,33 +57,51 @@ export function useRoomLobby() {
       const result = await joinRoom(nickname, roomCode);
       acceptSession(result.session, result.snapshot);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not join the room.");
+      setError(friendlyError(caught, "Could not join the room. Please try again."));
     } finally {
       setBusy(false);
     }
-  }, [acceptSession]);
+  }, [acceptSession, friendlyError]);
 
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
 
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    };
+
+    const scheduleReconnect = (connect: () => Promise<void>, delay: number) => {
+      clearReconnectTimer();
+      reconnectTimerRef.current = window.setTimeout(() => void connect(), delay);
+    };
+
     const connect = async () => {
       if (cancelled || leavingRef.current) return;
+      const generation = ++connectionGenerationRef.current;
+      clearReconnectTimer();
       setConnectionState(reconnectAttemptRef.current ? "reconnecting" : "connecting");
       try {
+        const freshSnapshot = await fetchRoomSnapshot(session);
+        if (cancelled || generation !== connectionGenerationRef.current) return;
+        setSnapshot((current) => !current || freshSnapshot.eventSequence >= current.eventSequence ? freshSnapshot : current);
         const ticket = await createSocketTicket(session);
-        if (cancelled) return;
+        if (cancelled || generation !== connectionGenerationRef.current) return;
         const socket = new WebSocket(socketUrl(session, ticket));
         socketRef.current = socket;
 
         socket.addEventListener("open", () => {
-          if (cancelled) return socket.close();
+          if (cancelled || generation !== connectionGenerationRef.current) return socket.close();
           reconnectAttemptRef.current = 0;
           setConnectionState("connected");
           setError(null);
         });
         socket.addEventListener("message", (event) => {
-          const message = JSON.parse(String(event.data)) as ServerMessage;
+          if (generation !== connectionGenerationRef.current) return;
+          let message: ServerMessage;
+          try { message = JSON.parse(String(event.data)) as ServerMessage; }
+          catch { return; }
           if (message.type === "ROOM_SNAPSHOT") {
             setSnapshot((current) => !current || message.snapshot.eventSequence >= current.eventSequence ? message.snapshot : current);
           } else if (message.type === "COMMAND_ACCEPTED") {
@@ -85,11 +114,12 @@ export function useRoomLobby() {
           }
         });
         socket.addEventListener("close", () => {
-          if (cancelled || leavingRef.current) return;
+          if (socketRef.current === socket) socketRef.current = null;
+          if (cancelled || leavingRef.current || generation !== connectionGenerationRef.current) return;
           setConnectionState(navigator.onLine ? "reconnecting" : "offline");
           reconnectAttemptRef.current += 1;
           const delay = Math.min(4_000, 300 * 2 ** reconnectAttemptRef.current) + Math.floor(Math.random() * 200);
-          reconnectTimerRef.current = window.setTimeout(connect, delay);
+          scheduleReconnect(connect, delay);
         });
         socket.addEventListener("error", () => socket.close());
       } catch (caught) {
@@ -99,23 +129,37 @@ export function useRoomLobby() {
           setSession(null);
           setSnapshot(null);
           setConnectionState("idle");
-          setError(caught.message);
+          setError(friendlyError(caught, "Your session could not be restored."));
           return;
         }
         setConnectionState(navigator.onLine ? "reconnecting" : "offline");
         reconnectAttemptRef.current += 1;
-        reconnectTimerRef.current = window.setTimeout(connect, Math.min(4_000, 400 * 2 ** reconnectAttemptRef.current));
+        scheduleReconnect(connect, Math.min(4_000, 400 * 2 ** reconnectAttemptRef.current));
       }
     };
 
+    const handleOnline = () => {
+      if (cancelled || leavingRef.current || socketRef.current?.readyState === WebSocket.OPEN || socketRef.current?.readyState === WebSocket.CONNECTING) return;
+      reconnectAttemptRef.current = 0;
+      void connect();
+    };
+    const handleOffline = () => setConnectionState("offline");
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     void connect();
     return () => {
       cancelled = true;
-      if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current);
+      connectionGenerationRef.current += 1;
+      clearReconnectTimer();
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       socketRef.current?.close();
       socketRef.current = null;
+      for (const resolve of pendingRef.current.values()) resolve(false);
+      pendingRef.current.clear();
     };
-  }, [session]);
+  }, [friendlyError, session]);
 
   const sendCommand = useCallback((type: ClientCommand["type"], payload: Record<string, unknown> = {}): Promise<boolean> => {
     const socket = socketRef.current;

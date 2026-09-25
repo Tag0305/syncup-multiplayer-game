@@ -155,6 +155,25 @@ describe("real multiplayer lobby", () => {
     refreshedGuest.close();
   });
 
+  it("survives repeated reconnect cycles without duplicating the player", async () => {
+    const room = await create("Maya");
+    const host = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    let guest = await connect(joined.data.session);
+    await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      guest.close();
+      await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.some((player) => player.playerId === joined.data.session.playerId && player.presence === "reconnecting"));
+      guest = await connect(joined.data.session);
+      const restored = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.some((player) => player.playerId === joined.data.session.playerId && player.presence === "connected"));
+      if (restored.type !== "ROOM_SNAPSHOT") throw new Error("Expected restored snapshot");
+      expect(restored.snapshot.players).toHaveLength(2);
+      expect(new Set(restored.snapshot.players.map((player) => player.playerId)).size).toBe(2);
+      expect(restored.snapshot.players.filter((player) => player.playerId === joined.data.session.playerId)).toHaveLength(1);
+    }
+  });
+
   it("removes a player permanently after explicit leave", async () => {
     const room = await create("Maya");
     const host = await connect(room.session);
@@ -280,6 +299,51 @@ describe("authoritative multiplayer game", () => {
     restoredGuest.send(command(joined.data.session, "REQUEST_SNAPSHOT", crypto.randomUUID(), question.snapshot.phaseVersion));
     const restored = await restoredGuest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
     expect(restored.type === "ROOM_SNAPSHOT" && restored.snapshot.phase === "question" && restored.snapshot.question.id).toBe(questionId);
+  });
+
+  it("restores a submitted state after reconnect without leaking the answer", async () => {
+    const room = await create("Maya");
+    const host = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    const guest = await connect(joined.data.session);
+    const lobby = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+    if (lobby.type !== "ROOM_SNAPSHOT") throw new Error("Expected lobby snapshot");
+    host.send(command(room.session, "START_GAME", crypto.randomUUID(), lobby.snapshot.phaseVersion));
+    const question = await guest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    if (question.type !== "ROOM_SNAPSHOT" || question.snapshot.phase !== "question") throw new Error("Expected question snapshot");
+    guest.send(command(joined.data.session, "SUBMIT_ANSWER", crypto.randomUUID(), question.snapshot.phaseVersion, { answer: "Private answer" }));
+    await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question" && message.snapshot.submissionProgress.submittedCount === 1);
+    guest.close();
+    await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.some((player) => player.playerId === joined.data.session.playerId && player.presence === "reconnecting"));
+    const restoredGuest = await connect(joined.data.session);
+    restoredGuest.send(command(joined.data.session, "REQUEST_SNAPSHOT", crypto.randomUUID(), question.snapshot.phaseVersion));
+    const restored = await restoredGuest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question" && message.snapshot.submissionProgress.submittedCount === 1);
+    if (restored.type !== "ROOM_SNAPSHOT" || restored.snapshot.phase !== "question") throw new Error("Expected restored question snapshot");
+    expect(restored.snapshot.players.find((player) => player.playerId === joined.data.session.playerId)?.answerStatus).toBe("submitted");
+    expect(JSON.stringify(restored.snapshot)).not.toContain("Private answer");
+    expect(JSON.stringify(restored.snapshot)).not.toContain("private answer");
+  });
+
+  it("rejects a stale parallel socket without overwriting newer game state", async () => {
+    const room = await create("Maya");
+    const originalHostSocket = await connect(room.session);
+    const joined = await join(room.roomCode, "Leo");
+    const guest = await connect(joined.data.session);
+    const lobby = await originalHostSocket.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.players.length === 2 && message.snapshot.players.every((player) => player.presence === "connected"));
+    if (lobby.type !== "ROOM_SNAPSHOT") throw new Error("Expected lobby snapshot");
+    const refreshedHostSocket = await connect(room.session);
+    refreshedHostSocket.send(command(room.session, "START_GAME", crypto.randomUUID(), lobby.snapshot.phaseVersion));
+    const question = await guest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    if (question.type !== "ROOM_SNAPSHOT" || question.snapshot.phase !== "question") throw new Error("Expected question snapshot");
+
+    const staleId = crypto.randomUUID();
+    originalHostSocket.send(command(room.session, "START_GAME", staleId, lobby.snapshot.phaseVersion));
+    const rejected = await originalHostSocket.next((message) => message.type === "COMMAND_REJECTED" && message.commandId === staleId);
+    expect(rejected.type === "COMMAND_REJECTED" && rejected.code).toBe("STALE_PHASE");
+    originalHostSocket.close();
+    guest.send(command(joined.data.session, "REQUEST_SNAPSHOT", crypto.randomUUID(), question.snapshot.phaseVersion));
+    const current = await guest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "question");
+    expect(current.type === "ROOM_SNAPSHOT" && current.snapshot.players.find((player) => player.playerId === room.session.playerId)?.presence).toBe("connected");
   });
 
   it("completes five synchronized rounds and makes Play Again idempotent", async () => {

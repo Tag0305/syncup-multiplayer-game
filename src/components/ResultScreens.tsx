@@ -4,10 +4,10 @@ import type { PublicRoomSnapshot } from "../protocol/messages";
 
 function Rankings({ entries, currentPlayerId }: { entries: LeaderboardEntry[]; currentPlayerId: string }) {
   return <div className="ranking-list">{entries.map((player, index) => (
-    <div className={player.rank === 1 ? "leader" : ""} key={player.playerId}>
+    <div className={`${player.rank === 1 ? "leader" : ""} ${player.playerId === currentPlayerId ? "current-player" : ""}`} key={player.playerId}>
       <b>{player.rank}</b><span className={`avatar ${index % 3 === 0 ? "mint" : index % 3 === 1 ? "coral" : "blue"}`}>{player.nickname[0]?.toUpperCase()}</span>
       <strong>{player.nickname}{player.playerId === currentPlayerId ? " (you)" : ""}<small>{player.roundPoints > 0 ? `+${player.roundPoints} this round` : "No points this round"}</small></strong>
-      <em>{player.score} pts</em>
+      <em><small>Total</small>{player.score} pts</em>
     </div>
   ))}</div>;
 }
@@ -22,15 +22,19 @@ interface RevealProps {
 export function RevealScreen({ snapshot, currentPlayerId, commandBusy, onContinue }: RevealProps) {
   const isHost = snapshot.hostPlayerId === currentPlayerId;
   const hasMatch = snapshot.revealedAnswers.some((answer) => answer.matchSize >= 2);
+  const matchGroups = new Map<string, number>();
+  for (const answer of snapshot.revealedAnswers) {
+    if (answer.normalizedGroup && answer.matchSize >= 2 && !matchGroups.has(answer.normalizedGroup)) matchGroups.set(answer.normalizedGroup, matchGroups.size);
+  }
   return (
     <main className="round-shell reveal-shell">
       <div className="round-topline"><span>ROUND {snapshot.roundNumber} RESULTS</span><strong className="sync-label"><Sparkles size={16} /> {hasMatch ? "MATCH FOUND" : "ALL UNIQUE"}</strong></div>
-      <section className="reveal-card">
+      <section className="reveal-card" aria-live="polite">
         <p>{snapshot.question?.text}</p><h1>{hasMatch ? "Great minds think alike." : "Different minds this time."}</h1>
         <div className="answer-grid">{snapshot.revealedAnswers.map((answer) => (
-          <article className={answer.matchSize >= 2 ? "matched" : ""} key={answer.playerId}>
+          <article className={answer.matchSize >= 2 ? `matched match-group-${matchGroups.get(answer.normalizedGroup ?? "") ?? 0}` : ""} key={answer.playerId}>
             <span>{answer.nickname}{answer.playerId === currentPlayerId ? " (you)" : ""}</span><strong>{answer.answer}</strong><em>+{answer.pointsAwarded}</em>
-            {answer.matchSize >= 2 && <small>{answer.matchSize} matched</small>}
+            <small>{answer.answer === "No answer" ? "NO ANSWER" : answer.matchSize >= 2 ? `IN SYNC · ${answer.matchSize} PLAYERS` : "NO MATCH"}</small>
           </article>
         ))}</div>
         {isHost ? <button className="primary-button compact" disabled={commandBusy} onClick={() => void onContinue()}>See standings →</button> : <small className="waiting-copy">Waiting for the host · continues automatically</small>}
@@ -70,9 +74,9 @@ export function FinalScreen({ snapshot, currentPlayerId, commandBusy, onReplay }
   const isHost = snapshot.hostPlayerId === currentPlayerId;
   const winnerText = winners.length > 1 ? `${winners.map((winner) => winner.nickname).join(" & ")} tie!` : `${winners[0]?.nickname ?? "No one"} wins!`;
   return (
-    <main className="round-shell final-shell"><section className="winner-card"><div className="crown"><Crown /></div><p>{winners.length > 1 ? "SHARED WINNERS" : "THE MOST IN SYNC"}</p><h1>{winnerText}</h1><strong className="winning-score">{winners[0]?.score ?? 0} points</strong>
+    <main className="round-shell final-shell"><section className="winner-card" aria-live="polite"><div className="crown"><Crown /></div><p>{winners.length > 1 ? "SHARED WINNERS" : "THE MOST IN SYNC"}</p><h1>{winnerText}</h1><strong className="winning-score">{winners[0]?.score ?? 0} points</strong>
       <Rankings entries={snapshot.leaderboard} currentPlayerId={currentPlayerId} />
       {isHost ? <button className="primary-button compact" disabled={commandBusy || snapshot.players.length < 2} onClick={() => void onReplay()}><RotateCcw size={18} /> Play again</button> : <small>Waiting for the host to start another game.</small>}
-      <small>Same room. Same crew. Fresh questions.</small></section></main>
+      <small className="final-continuity">Room {snapshot.roomCode} stays open · {snapshot.players.length} players remain together</small></section></main>
   );
 }
