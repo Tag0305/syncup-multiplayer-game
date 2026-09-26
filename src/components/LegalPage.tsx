@@ -30,7 +30,7 @@ function PrivacyPolicy() {
       <p>The current SyncUp code does not include an advertising system or a third-party product analytics or tracking SDK. Cloudflare observability is enabled for operational monitoring.</p>
 
       <h2>Contact</h2>
-      <p><strong>TODO before final launch:</strong> add a monitored contact email address for privacy questions.</p>
+      <p>For privacy questions, email <a href="mailto:tagoreronanki77@gmail.com">tagoreronanki77@gmail.com</a>.</p>
     </>
   );
 }
@@ -58,7 +58,7 @@ function Terms() {
       <p>SyncUp is provided as available without a guarantee that it will always be error-free or uninterrupted. To the extent permitted by applicable law, the project owner is not responsible for indirect or consequential losses resulting from use of or inability to use the service.</p>
 
       <h2>Contact</h2>
-      <p><strong>TODO before final launch:</strong> add a monitored contact email address for terms questions.</p>
+      <p>For terms questions, email <a href="mailto:tagoreronanki77@gmail.com">tagoreronanki77@gmail.com</a>.</p>
     </>
   );
 }
