@@ -1,4 +1,4 @@
-import { Crown, RotateCcw, Sparkles } from "lucide-react";
+import { Crown, LogOut, RotateCcw } from "lucide-react";
 import type { LeaderboardEntry } from "../game/room-state";
 import type { PublicRoomSnapshot } from "../protocol/messages";
 
@@ -28,13 +28,13 @@ export function RevealScreen({ snapshot, currentPlayerId, commandBusy, onContinu
   }
   return (
     <main className="round-shell reveal-shell">
-      <div className="round-topline"><span>ROUND {snapshot.roundNumber} RESULTS</span><strong className="sync-label"><Sparkles size={16} /> {hasMatch ? "MATCH FOUND" : "ALL UNIQUE"}</strong></div>
+      <div className="round-topline"><span>ROUND {snapshot.roundNumber} RESULTS</span><strong className="sync-label">{hasMatch ? "MATCH FOUND" : "ALL UNIQUE"}</strong></div>
       <section className="reveal-card" aria-live="polite">
         <p>{snapshot.question?.text}</p><h1>{hasMatch ? "Great minds think alike." : "Different minds this time."}</h1>
         <div className="answer-grid">{snapshot.revealedAnswers.map((answer) => (
           <article className={answer.matchSize >= 2 ? `matched match-group-${matchGroups.get(answer.normalizedGroup ?? "") ?? 0}` : ""} key={answer.playerId}>
             <span>{answer.nickname}{answer.playerId === currentPlayerId ? " (you)" : ""}</span><strong>{answer.answer}</strong><em>+{answer.pointsAwarded}</em>
-            <small>{answer.answer === "No answer" ? "NO ANSWER" : answer.matchSize >= 2 ? `IN SYNC · ${answer.matchSize} PLAYERS` : "NO MATCH"}</small>
+            <small>{answer.answer === "No answer" ? "NO ANSWER" : answer.matchSize >= 2 ? `IN SYNC: ${answer.matchSize} PLAYERS` : "NO MATCH"}</small>
           </article>
         ))}</div>
         {isHost ? <button className="primary-button compact" disabled={commandBusy} onClick={() => void onContinue()}>See standings →</button> : <small className="waiting-copy">Waiting for the host · continues automatically</small>}
@@ -67,16 +67,20 @@ interface FinalProps {
   currentPlayerId: string;
   commandBusy: boolean;
   onReplay: () => Promise<boolean>;
+  onExit: () => Promise<void>;
 }
 
-export function FinalScreen({ snapshot, currentPlayerId, commandBusy, onReplay }: FinalProps) {
+export function FinalScreen({ snapshot, currentPlayerId, commandBusy, onReplay, onExit }: FinalProps) {
   const winners = snapshot.leaderboard.filter((entry) => snapshot.winnerPlayerIds.includes(entry.playerId));
   const isHost = snapshot.hostPlayerId === currentPlayerId;
   const winnerText = winners.length > 1 ? `${winners.map((winner) => winner.nickname).join(" & ")} tie!` : `${winners[0]?.nickname ?? "No one"} wins!`;
   return (
     <main className="round-shell final-shell"><section className="winner-card" aria-live="polite"><div className="crown"><Crown /></div><p>{winners.length > 1 ? "SHARED WINNERS" : "THE MOST IN SYNC"}</p><h1>{winnerText}</h1><strong className="winning-score">{winners[0]?.score ?? 0} points</strong>
       <Rankings entries={snapshot.leaderboard} currentPlayerId={currentPlayerId} />
-      {isHost ? <button className="primary-button compact" disabled={commandBusy || snapshot.players.length < 2} onClick={() => void onReplay()}><RotateCcw size={18} /> Play again</button> : <small>Waiting for the host to start another game.</small>}
-      <small className="final-continuity">Room {snapshot.roomCode} stays open · {snapshot.players.length} players remain together</small></section></main>
+      {isHost && snapshot.players.length >= 2 && <button className="primary-button compact" disabled={commandBusy} onClick={() => void onReplay()}><RotateCcw size={18} /> Play again</button>}
+      {isHost && snapshot.players.length < 2 && <p className="replay-requirement">At least 2 players are needed to play again.</p>}
+      {!isHost && snapshot.players.length >= 2 && <small>Waiting for the host to start another game.</small>}
+      <button className="secondary-button compact exit-button" type="button" disabled={commandBusy} onClick={() => void onExit()}><LogOut size={18} /> Exit to Home</button>
+      <small className="final-continuity">Room {snapshot.roomCode} stays open. {snapshot.players.length} players remain together.</small></section></main>
   );
 }

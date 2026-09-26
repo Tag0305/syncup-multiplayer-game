@@ -29,7 +29,7 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
     const text = `Join my SyncUp room with code ${snapshot.roomCode}`;
     try {
       if (navigator.share) await navigator.share({ title: "Join SyncUp", text, url: window.location.href });
-      else await navigator.clipboard.writeText(`${text} — ${window.location.href}`);
+      else await navigator.clipboard.writeText(`${text}: ${window.location.href}`);
     } catch {
       // Cancelling the native share sheet needs no visible error.
     }
@@ -74,7 +74,7 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
           </div>
         </div>
         <aside className="lobby-aside">
-          <div className="pulse-mark" aria-hidden="true"><i /><i /><i /></div>
+          <UsersRound size={30} aria-hidden="true" />
           <h2>{snapshot.players.length < 2 ? "Invite a friend" : "Everyone's here?"}</h2>
           <p>{snapshot.players.length < 2 ? "Share the room code to bring another player into the lobby." : "The room is live and everyone is synchronized."}</p>
           <button className="primary-button" type="button" aria-busy={commandBusy} disabled={!canStart || commandBusy} onClick={() => void onStart()}>{commandBusy ? "Starting…" : "Start game"} <span>→</span></button>

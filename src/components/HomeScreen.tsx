@@ -1,4 +1,4 @@
-import { ArrowRight, CircleHelp, Copy, Sparkles, UsersRound } from "lucide-react";
+import { ArrowRight, CircleHelp } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { HowToPlay } from "./HowToPlay";
 
@@ -22,18 +22,13 @@ export function HomeScreen({ onCreate, onJoin, busy, error }: HomeScreenProps) {
   return (
     <main className="home-grid" id="home">
       <section className="intro-panel">
-        <div className="eyebrow"><Sparkles size={16} /> Real-time party game</div>
-        <h1>How well do your minds <span>sync?</span></h1>
-        <p className="lede">Answer the same question. Match your friends. Find out who is on your wavelength.</p>
+        <div className="eyebrow">MULTIPLAYER PARTY GAME</div>
+        <h1>Match answers.<br /><span>Score together.</span></h1>
+        <p className="lede">Answer the same prompt. Match your friends. Score when your answers sync.</p>
         <div className="mini-flow" aria-label="How it works">
           <span><strong>01</strong> Join</span><i /><span><strong>02</strong> Answer</span><i /><span><strong>03</strong> Match</span>
         </div>
         <button className="text-button how-to-trigger" type="button" onClick={() => setShowHowTo(true)}><CircleHelp size={17} /> How to play</button>
-        <div className="orbit" aria-hidden="true">
-          <div className="orbit-ring ring-one"><span>pizza</span></div>
-          <div className="orbit-ring ring-two"><span>pizza</span></div>
-          <div className="orbit-core"><UsersRound /><strong>+100</strong><small>IN SYNC</small></div>
-        </div>
       </section>
 
       <section className="entry-card" aria-labelledby="play-heading">
@@ -59,7 +54,6 @@ export function HomeScreen({ onCreate, onJoin, busy, error }: HomeScreenProps) {
             <span>Room code</span>
             <div className="code-field">
               <input value={roomCode} disabled={busy} inputMode="text" autoCapitalize="characters" autoComplete="off" onChange={(event) => setRoomCode(event.target.value.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase())} placeholder="ABC234" aria-describedby="room-hint" />
-              <Copy size={18} aria-hidden="true" />
             </div>
           </label>
           <p className="field-hint" id="room-hint">Six characters from your host</p>
