@@ -11,8 +11,14 @@ function stateWithSecrets(phase: "setup" | "question" | "reveal" = "question"): 
   state.hostQuestions = Array.from({ length: 5 }, (_, index) => ({
     id: `host-question-${index + 1}`,
     question: `Private game question ${index + 1}?`,
-    rawAnswer: index === 0 ? "Saffron-code" : `Future-secret-${index + 1}`,
-    normalizedAnswer: index === 0 ? "saffron-code" : `future-secret-${index + 1}`,
+    primaryAnswer: {
+      rawAnswer: index === 0 ? "Saffron-code" : `Future-secret-${index + 1}`,
+      normalizedAnswer: index === 0 ? "saffron-code" : `future-secret-${index + 1}`,
+    },
+    acceptedAlternatives: [{
+      rawAnswer: index === 0 ? "Current-secret-alias" : `Future-alias-${index + 1}`,
+      normalizedAnswer: index === 0 ? "current-secret-alias" : `future-alias-${index + 1}`,
+    }],
   }));
   state.setupStatus = phase === "setup" ? "editing" : "locked";
   state.phase = phase;
@@ -47,8 +53,10 @@ describe("role-aware room snapshot privacy", () => {
     const hostSnapshot = toClientSnapshot(state, 1_000, "host");
     expect(JSON.stringify(playerSnapshot)).not.toContain("Saffron-code");
     expect(JSON.stringify(playerSnapshot)).not.toContain("Future-secret");
+    expect(JSON.stringify(playerSnapshot)).not.toContain("secret-alias");
     expect(hostSnapshot.phase === "setup" && "hostSetup" in hostSnapshot && hostSnapshot.hostSetup.questions).toHaveLength(5);
     expect(hostSnapshot.phase === "setup" && "hostSetup" in hostSnapshot && hostSnapshot.hostSetup.questions[0].answer).toBe("Saffron-code");
+    expect(hostSnapshot.phase === "setup" && "hostSetup" in hostSnapshot && hostSnapshot.hostSetup.questions[0].acceptedAnswers).toEqual(["Current-secret-alias"]);
   });
 
   it("exposes only submission status, progress, deadline, and the question before reveal", () => {
@@ -68,6 +76,10 @@ describe("role-aware room snapshot privacy", () => {
       "saffron-code",
       "Future-secret",
       "future-secret",
+      "Current-secret-alias",
+      "current-secret-alias",
+      "Future-alias",
+      "future-alias",
       "Player-secret-guess",
       "player-secret-guess",
       "rawAnswer",
@@ -83,6 +95,8 @@ describe("role-aware room snapshot privacy", () => {
     const serialized = JSON.stringify(toClientSnapshot(stateWithSecrets(), 1_000, "host"));
     expect(serialized).toContain("Saffron-code");
     expect(serialized).not.toContain("Future-secret");
+    expect(serialized).not.toContain("secret-alias");
+    expect(serialized).not.toContain("Future-alias");
     expect(serialized).not.toContain("Player-secret-guess");
   });
 
@@ -91,6 +105,8 @@ describe("role-aware room snapshot privacy", () => {
     expect(serialized).toContain("Saffron-code");
     expect(serialized).toContain("Player-secret-guess");
     expect(serialized).not.toContain("Future-secret");
+    expect(serialized).not.toContain("secret-alias");
+    expect(serialized).not.toContain("Future-alias");
     expect(serialized).not.toContain("normalizedAnswer");
     expect(serialized).not.toContain("reconnectTokenHash");
   });

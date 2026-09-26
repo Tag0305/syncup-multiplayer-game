@@ -81,7 +81,7 @@ function playerTag(playerId: string): string {
 
 function upgradeState(state: PrivateRoomState): PrivateRoomState {
   const candidate = state as unknown as Record<string, unknown>;
-  if (candidate.schemaVersion !== 3) {
+  if (candidate.schemaVersion !== 3 && candidate.schemaVersion !== 4) {
     const originalHostPlayerId = typeof candidate.hostPlayerId === "string" ? candidate.hostPlayerId : "";
     candidate.schemaVersion = 3;
     candidate.originalHostPlayerId = originalHostPlayerId;
@@ -99,6 +99,22 @@ function upgradeState(state: PrivateRoomState): PrivateRoomState {
       // locked host-authored answers. Their clients must create a new room.
       candidate.status = "closed";
     }
+  }
+  if (candidate.schemaVersion === 3) {
+    const legacyQuestions = Array.isArray(candidate.hostQuestions) ? candidate.hostQuestions : [];
+    candidate.hostQuestions = legacyQuestions.map((value) => {
+      const question = value as Record<string, unknown>;
+      return {
+        id: String(question.id ?? ""),
+        question: String(question.question ?? ""),
+        primaryAnswer: {
+          rawAnswer: String(question.rawAnswer ?? ""),
+          normalizedAnswer: String(question.normalizedAnswer ?? ""),
+        },
+        acceptedAlternatives: [],
+      };
+    });
+    candidate.schemaVersion = 4;
   }
   return candidate as unknown as PrivateRoomState;
 }

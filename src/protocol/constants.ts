@@ -5,6 +5,7 @@ export const GAME_CONFIG = {
   answerDurationMs: 45_000,
   reconnectGraceMs: 30_000,
   maxAnswerLength: 60,
+  maxAcceptedAnswers: 5,
   maxQuestionLength: 140,
   roomCodeLength: 6,
   roomMaxLifetimeMs: 24 * 60 * 60 * 1_000,

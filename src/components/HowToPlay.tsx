@@ -17,9 +17,9 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
         <p className="kicker">QUICK RULES</p><h2 id="how-to-title">How to Play</h2>
         <ol className="how-to-steps">
           <li>The host creates five questions about themselves.</li>
-          <li>The host secretly answers and locks them.</li>
+          <li>The host locks a secret answer and any accepted alternatives.</li>
           <li>Players join with the room code and guess each locked answer.</li>
-          <li>An exact normalized match earns 100 points.</li>
+          <li>A matching accepted answer earns 100 points. Small spelling mistakes may count.</li>
           <li>After five rounds, the highest score wins.</li>
         </ol>
         <div className="rule-example" aria-label="Scoring example">

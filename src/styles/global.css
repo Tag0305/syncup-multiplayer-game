@@ -115,6 +115,17 @@ h1, h2 { font-family: "Space Grotesk Variable", sans-serif; margin: 0; }
 .setup-form fieldset { margin: 0; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .setup-form legend { color: var(--mint); padding: 0 7px; font-size: .7rem; font-weight: 850; letter-spacing: .12em; }
 .setup-form .field:last-child { margin-bottom: 0; }
+.accepted-answer-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.accepted-answer-section > div:first-child { margin-bottom: 13px; }
+.accepted-answer-section > div:first-child strong { color: #dce6ed; font-size: .84rem; }
+.accepted-answer-section > div:first-child p { color: var(--muted); font-size: .75rem; line-height: 1.5; margin: 5px 0 0; }
+.accepted-answer-section > small { display: block; color: #8295a2; font-size: .66rem; margin-top: 9px; }
+.accepted-answer-row { display: grid; grid-template-columns: minmax(0,1fr) 42px; gap: 8px; align-items: end; margin-bottom: 10px; }
+.accepted-answer-row .field { margin: 0; }
+.remove-answer-button { width: 42px; height: 48px; display: grid; place-items: center; color: #ffb0a9; background: #101f30; border: 1px solid var(--line); border-radius: 8px; }
+.remove-answer-button:hover:not(:disabled) { background: #2a1b23; border-color: #684047; }
+.add-answer-button { min-height: 40px; padding: 0 13px; display: inline-flex; align-items: center; gap: 7px; color: var(--mint); background: transparent; border: 1px solid var(--line-strong); border-radius: 8px; font-weight: 800; font-size: .76rem; }
+.add-answer-button:hover:not(:disabled) { background: #10252a; border-color: #39766d; }
 .setup-review-button { max-width: 320px; margin: 24px 0 0 auto; }
 .setup-actions { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; margin-top: 25px; }
 .review-list { display: grid; gap: 10px; margin-top: 30px; }
@@ -122,6 +133,9 @@ h1, h2 { font-family: "Space Grotesk Variable", sans-serif; margin: 0; }
 .review-list span, .review-list small { color: var(--muted); font-size: .65rem; font-weight: 800; letter-spacing: .1em; }
 .review-list strong { font: 700 1.15rem "Space Grotesk Variable", sans-serif; overflow-wrap: anywhere; }
 .review-list em { color: var(--mint); font-style: normal; font-weight: 750; overflow-wrap: anywhere; }
+.review-alternatives { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.review-alternatives ul { display: flex; flex-wrap: wrap; gap: 7px; list-style: none; padding: 0; margin: 7px 0 0; }
+.review-alternatives li { padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 5px; color: #dce7ec; font-size: .75rem; }
 .waiting-panel { min-height: 430px; display: grid; place-items: center; align-content: center; text-align: center; padding: 38px 20px; }
 .waiting-panel > svg { color: var(--mint); }
 .waiting-panel .kicker { margin: 18px 0 8px; }

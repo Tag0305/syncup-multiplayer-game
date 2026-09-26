@@ -63,7 +63,7 @@ export function createInitialRoomState(args: {
   now: number;
 }): PrivateRoomState {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     roomId: args.roomId,
     roomCode: args.roomCode,
     status: "lobby",

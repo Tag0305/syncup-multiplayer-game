@@ -26,6 +26,11 @@ export interface PlayerState {
 export interface HostQuestionState {
   id: string;
   question: string;
+  primaryAnswer: LockedAnswerState;
+  acceptedAlternatives: LockedAnswerState[];
+}
+
+export interface LockedAnswerState {
   rawAnswer: string;
   normalizedAnswer: string;
 }
@@ -78,7 +83,7 @@ export interface SocketTicketState {
 }
 
 export interface PrivateRoomState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   roomId: string;
   roomCode: string;
   status: RoomStatus;
@@ -220,13 +225,17 @@ export function toClientSnapshot(state: PrivateRoomState, serverNow: number, vie
     return {
       ...publicSnapshot,
       hostSetup: {
-        questions: state.hostQuestions.map(({ question, rawAnswer }) => ({ question, answer: rawAnswer })),
+        questions: state.hostQuestions.map(({ question, primaryAnswer, acceptedAlternatives }) => ({
+          question,
+          answer: primaryAnswer.rawAnswer,
+          acceptedAnswers: acceptedAlternatives.map(({ rawAnswer }) => rawAnswer),
+        })),
       },
     };
   }
   if (publicSnapshot.phase === "question") {
     const locked = state.hostQuestions[state.roundNumber - 1];
-    return { ...publicSnapshot, hostLockedAnswer: locked?.rawAnswer ?? "" };
+    return { ...publicSnapshot, hostLockedAnswer: locked?.primaryAnswer.rawAnswer ?? "" };
   }
   return publicSnapshot;
 }

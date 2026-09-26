@@ -201,7 +201,7 @@ export function useRoomLobby() {
     finally { setCommandBusy(false); }
   }, [sendCommand]);
 
-  const saveSetup = useCallback(async (questions: Array<{ question: string; answer: string }>) => {
+  const saveSetup = useCallback(async (questions: Array<{ question: string; answer: string; acceptedAnswers: string[] }>) => {
     setCommandBusy(true);
     setError(null);
     try { return await sendCommand("SAVE_SETUP", { questions }); }

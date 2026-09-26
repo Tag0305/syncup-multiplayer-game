@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
 import { clearSession, loadSession, saveSession } from "../src/api/session";
 import { HomeScreen } from "../src/components/HomeScreen";
+import { HostSetupScreen } from "../src/components/HostSetupScreen";
 import { FinalScreen } from "../src/components/ResultScreens";
-import type { PublicRoomSnapshot } from "../src/protocol/messages";
+import type { ClientRoomSnapshot, PublicRoomSnapshot } from "../src/protocol/messages";
 
 afterEach(() => {
   cleanup();
@@ -32,9 +33,44 @@ describe("SyncUp room entry", () => {
     fireEvent.click(screen.getByRole("button", { name: /how to play/i }));
     expect(screen.getByRole("dialog", { name: /how to play/i })).toBeInTheDocument();
     expect(screen.getByText(/host creates five questions/i)).toBeInTheDocument();
-    expect(screen.getByText(/exact normalized match earns 100 points/i)).toBeInTheDocument();
+    expect(screen.getByText(/matching accepted answer earns 100 points/i)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: /how to play/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("host setup alternatives", () => {
+  it("saves and reviews optional accepted answers before lock", async () => {
+    const snapshot = {
+      phase: "setup",
+      roomCode: "ABC234",
+      status: "lobby",
+      roundNumber: 0,
+      totalRounds: 5,
+      phaseVersion: 1,
+      eventSequence: 3,
+      serverNow: Date.now(),
+      hostPlayerId: "host",
+      hostName: "Tagore",
+      setupStatus: "editing",
+      players: [{ playerId: "host", nickname: "Tagore", role: "host", presence: "connected", score: 0 }],
+      phaseEndsAt: null,
+      hostSetup: {
+        questions: Array.from({ length: 5 }, (_, index) => ({
+          question: `Question ${index + 1}?`,
+          answer: index === 0 ? "Mutton Biriyani" : `Answer ${index + 1}`,
+          acceptedAnswers: index === 0 ? ["Biriyani", "Biryani"] : [],
+        })),
+      },
+    } as Extract<ClientRoomSnapshot, { phase: "setup" }>;
+    const onSave = vi.fn().mockResolvedValue(true);
+    render(<HostSetupScreen snapshot={snapshot} currentPlayerId="host" connectionState="connected" commandBusy={false} onSave={onSave} onLock={vi.fn()} onLeave={vi.fn()} />);
+    expect(screen.getAllByText(/add other answers that should also count as correct/i)).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: /review game/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0][0].acceptedAnswers).toEqual(["Biriyani", "Biryani"]);
+    expect(screen.getByText("Biriyani")).toBeInTheDocument();
+    expect(screen.getByText("Biryani")).toBeInTheDocument();
   });
 });
 

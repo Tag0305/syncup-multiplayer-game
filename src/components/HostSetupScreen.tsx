@@ -1,12 +1,12 @@
-import { Check, Copy, LogOut, Share2, UserRound, UsersRound } from "lucide-react";
+import { Check, Copy, LogOut, Plus, Share2, UserRound, UsersRound, X } from "lucide-react";
 import { useState } from "react";
 import type { ConnectionState } from "../api/useRoomLobby";
 import type { ClientRoomSnapshot } from "../protocol/messages";
 
 type SetupSnapshot = Extract<ClientRoomSnapshot, { phase: "setup" }>;
-type SetupPair = { question: string; answer: string };
+type SetupPair = { question: string; answer: string; acceptedAnswers: string[] };
 
-const blankSetup = (): SetupPair[] => Array.from({ length: 5 }, () => ({ question: "", answer: "" }));
+const blankSetup = (): SetupPair[] => Array.from({ length: 5 }, () => ({ question: "", answer: "", acceptedAnswers: [] }));
 
 interface Props {
   snapshot: SetupSnapshot;
@@ -28,12 +28,34 @@ export function HostSetupScreen({ snapshot, currentPlayerId, connectionState, co
   const competitors = snapshot.players.filter((player) => player.role === "player");
   const host = snapshot.players.find((player) => player.playerId === snapshot.hostPlayerId);
 
-  const updatePair = (index: number, field: keyof SetupPair, value: string) => {
+  const updatePair = (index: number, field: "question" | "answer", value: string) => {
     setQuestions((current) => current.map((pair, pairIndex) => pairIndex === index ? { ...pair, [field]: value } : pair));
+  };
+  const addAcceptedAnswer = (index: number) => {
+    setQuestions((current) => current.map((pair, pairIndex) => pairIndex === index && pair.acceptedAnswers.length < 4
+      ? { ...pair, acceptedAnswers: [...pair.acceptedAnswers, ""] }
+      : pair));
+  };
+  const updateAcceptedAnswer = (questionIndex: number, answerIndex: number, value: string) => {
+    setQuestions((current) => current.map((pair, pairIndex) => pairIndex === questionIndex
+      ? { ...pair, acceptedAnswers: pair.acceptedAnswers.map((answer, index) => index === answerIndex ? value : answer) }
+      : pair));
+  };
+  const removeAcceptedAnswer = (questionIndex: number, answerIndex: number) => {
+    setQuestions((current) => current.map((pair, pairIndex) => pairIndex === questionIndex
+      ? { ...pair, acceptedAnswers: pair.acceptedAnswers.filter((_, index) => index !== answerIndex) }
+      : pair));
   };
   const review = async () => {
     if (!complete) return;
-    if (await onSave(questions)) setReviewing(true);
+    const preparedQuestions = questions.map((pair) => ({
+      ...pair,
+      acceptedAnswers: pair.acceptedAnswers.filter((answer) => answer.trim()),
+    }));
+    if (await onSave(preparedQuestions)) {
+      setQuestions(preparedQuestions);
+      setReviewing(true);
+    }
   };
   const copyCode = async () => {
     await navigator.clipboard.writeText(snapshot.roomCode);
@@ -72,12 +94,13 @@ export function HostSetupScreen({ snapshot, currentPlayerId, connectionState, co
         <section className="setup-panel review-panel">
           <p className="kicker">REVIEW GAME</p>
           <h1>Check every answer before locking.</h1>
-          <p className="setup-intro">Once the game starts, these answers cannot be changed.</p>
+          <p className="setup-intro">Once locked, these answers cannot be changed.</p>
           <div className="review-list">
             {questions.map((pair, index) => (
               <article key={index}>
                 <span>QUESTION {index + 1}</span><strong>{pair.question}</strong>
                 <small>SECRET ANSWER</small><em>{pair.answer}</em>
+                {pair.acceptedAnswers.length > 0 && <div className="review-alternatives"><small>ALSO ACCEPT</small><ul>{pair.acceptedAnswers.map((answer, answerIndex) => <li key={answerIndex}>{answer}</li>)}</ul></div>}
               </article>
             ))}
           </div>
@@ -96,7 +119,18 @@ export function HostSetupScreen({ snapshot, currentPlayerId, connectionState, co
               <fieldset key={index}>
                 <legend>QUESTION {index + 1}</legend>
                 <label className="field"><span>Question</span><textarea value={pair.question} maxLength={140} disabled={commandBusy} onChange={(event) => updatePair(index, "question", event.target.value)} placeholder="What is my favorite food?" /><small>{pair.question.length}/140</small></label>
-                <label className="field"><span>Secret answer</span><input value={pair.answer} maxLength={60} disabled={commandBusy} onChange={(event) => updatePair(index, "answer", event.target.value)} placeholder="Biryani" /><small>{pair.answer.length}/60</small></label>
+                <label className="field"><span>Primary secret answer</span><input value={pair.answer} maxLength={60} disabled={commandBusy} onChange={(event) => updatePair(index, "answer", event.target.value)} placeholder="Mutton Biriyani" /><small>{pair.answer.length}/60</small></label>
+                <div className="accepted-answer-section">
+                  <div><strong>Optional accepted answers</strong><p>Add other answers that should also count as correct.</p></div>
+                  {pair.acceptedAnswers.map((answer, answerIndex) => (
+                    <div className="accepted-answer-row" key={answerIndex}>
+                      <label className="field"><span>Also accept {answerIndex + 1}</span><input value={answer} maxLength={60} disabled={commandBusy} onChange={(event) => updateAcceptedAnswer(index, answerIndex, event.target.value)} placeholder="Biriyani" /><small>{answer.length}/60</small></label>
+                      <button className="remove-answer-button" type="button" disabled={commandBusy} onClick={() => removeAcceptedAnswer(index, answerIndex)} aria-label={`Remove accepted answer ${answerIndex + 1} from question ${index + 1}`}><X size={17} /></button>
+                    </div>
+                  ))}
+                  {pair.acceptedAnswers.length < 4 && <button className="add-answer-button" type="button" disabled={commandBusy} onClick={() => addAcceptedAnswer(index)}><Plus size={16} /> Add accepted answer</button>}
+                  <small>{pair.acceptedAnswers.length} of 4 alternatives added</small>
+                </div>
               </fieldset>
             ))}
           </div>

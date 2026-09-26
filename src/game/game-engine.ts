@@ -22,17 +22,112 @@ export class GameError extends Error {
 export interface HostSetupInput {
   question: string;
   answer: string;
+  acceptedAnswers?: readonly string[];
+}
+
+const OUTER_PUNCTUATION = /^\p{P}+|\p{P}+$/gu;
+const WORD_PATTERN = /[\p{L}\p{N}]+/gu;
+const PARTIAL_STOP_WORDS = new Set(["a", "an", "and", "at", "for", "in", "is", "my", "of", "on", "or", "the", "to", "with"]);
+const MIN_PARTIAL_CHARACTERS = 5;
+
+function canonicalizePunctuation(value: string): string {
+  return value
+    .replace(/[‘’‚‛]/gu, "'")
+    .replace(/[“”„‟]/gu, "\"")
+    .replace(/[‐‑‒–—―]/gu, "-");
 }
 
 export function normalizeAnswer(value: string): string {
-  return value
-    .normalize("NFKC")
+  return canonicalizePunctuation(value.normalize("NFKC"))
     .trim()
     .replace(/\s+/gu, " ")
-    .replace(/^\p{P}+|\p{P}+$/gu, "")
+    .replace(OUTER_PUNCTUATION, "")
     .trim()
     .replace(/\s+/gu, " ")
     .toLocaleLowerCase("en-US");
+}
+
+function answerTokens(normalizedAnswer: string): string[] {
+  return normalizedAnswer.match(WORD_PATTERN) ?? [];
+}
+
+function hasMeaningfulPartial(tokens: readonly string[]): boolean {
+  const characters = tokens.reduce((total, token) => total + Array.from(token).length, 0);
+  return characters >= MIN_PARTIAL_CHARACTERS && tokens.some((token) => !PARTIAL_STOP_WORDS.has(token));
+}
+
+function containsContiguousWords(
+  acceptedTokens: readonly string[],
+  playerTokens: readonly string[],
+  wordsMatch: (acceptedWord: string, playerWord: string) => boolean,
+): boolean {
+  if (playerTokens.length === 0 || playerTokens.length > acceptedTokens.length) return false;
+  for (let offset = 0; offset <= acceptedTokens.length - playerTokens.length; offset += 1) {
+    if (playerTokens.every((token, index) => wordsMatch(acceptedTokens[offset + index], token))) return true;
+  }
+  return false;
+}
+
+export function damerauLevenshtein(left: string, right: string): number {
+  const source = Array.from(left);
+  const target = Array.from(right);
+  const distance = Array.from({ length: source.length + 1 }, () => Array<number>(target.length + 1).fill(0));
+  for (let index = 0; index <= source.length; index += 1) distance[index][0] = index;
+  for (let index = 0; index <= target.length; index += 1) distance[0][index] = index;
+  for (let sourceIndex = 1; sourceIndex <= source.length; sourceIndex += 1) {
+    for (let targetIndex = 1; targetIndex <= target.length; targetIndex += 1) {
+      const substitutionCost = source[sourceIndex - 1] === target[targetIndex - 1] ? 0 : 1;
+      distance[sourceIndex][targetIndex] = Math.min(
+        distance[sourceIndex - 1][targetIndex] + 1,
+        distance[sourceIndex][targetIndex - 1] + 1,
+        distance[sourceIndex - 1][targetIndex - 1] + substitutionCost,
+      );
+      if (
+        sourceIndex > 1
+        && targetIndex > 1
+        && source[sourceIndex - 1] === target[targetIndex - 2]
+        && source[sourceIndex - 2] === target[targetIndex - 1]
+      ) {
+        distance[sourceIndex][targetIndex] = Math.min(
+          distance[sourceIndex][targetIndex],
+          distance[sourceIndex - 2][targetIndex - 2] + 1,
+        );
+      }
+    }
+  }
+  return distance[source.length][target.length];
+}
+
+function wordsMatchWithTypoTolerance(acceptedWord: string, playerWord: string): boolean {
+  if (acceptedWord === playerWord) return true;
+  const shortestLength = Math.min(Array.from(acceptedWord).length, Array.from(playerWord).length);
+  const maximumEdits = shortestLength <= 4 ? 0 : shortestLength <= 8 ? 1 : 2;
+  if (maximumEdits === 0 || Math.abs(Array.from(acceptedWord).length - Array.from(playerWord).length) > maximumEdits) return false;
+  return damerauLevenshtein(acceptedWord, playerWord) <= maximumEdits;
+}
+
+function isSafeWholeWordPartial(playerAnswer: string, acceptedAnswer: string): boolean {
+  const playerTokens = answerTokens(playerAnswer);
+  const acceptedTokens = answerTokens(acceptedAnswer);
+  if (playerTokens.length >= acceptedTokens.length || !hasMeaningfulPartial(playerTokens)) return false;
+  return containsContiguousWords(acceptedTokens, playerTokens, (accepted, player) => accepted === player);
+}
+
+function isTypoTolerantMatch(playerAnswer: string, acceptedAnswer: string): boolean {
+  const playerTokens = answerTokens(playerAnswer);
+  const acceptedTokens = answerTokens(acceptedAnswer);
+  if (playerTokens.length === 0 || playerTokens.length > acceptedTokens.length) return false;
+  if (playerTokens.length < acceptedTokens.length && !hasMeaningfulPartial(playerTokens)) return false;
+  return containsContiguousWords(acceptedTokens, playerTokens, wordsMatchWithTypoTolerance);
+}
+
+export type AnswerMatchKind = "exact" | "partial" | "typo";
+
+export function classifyAnswerMatch(playerAnswer: string, acceptedAnswers: readonly string[]): AnswerMatchKind | null {
+  if (acceptedAnswers.some((accepted) => playerAnswer === accepted)) return "exact";
+  if (acceptedAnswers.some((accepted) => isSafeWholeWordPartial(playerAnswer, accepted))) return "partial";
+  if (acceptedAnswers.some((accepted) => isTypoTolerantMatch(playerAnswer, accepted))) return "typo";
+  return null;
 }
 
 export function cleanAnswer(value: string): { rawAnswer: string; normalizedAnswer: string } {
@@ -61,11 +156,27 @@ function prepareHostQuestions(input: readonly HostSetupInput[]): HostQuestionSta
   if (input.length !== GAME_CONFIG.totalRounds) {
     throw new GameError("SETUP_INCOMPLETE", "Complete exactly five questions and secret answers.");
   }
-  return input.map((pair, index) => ({
-    id: `host-question-${index + 1}`,
-    question: cleanQuestion(pair.question),
-    ...cleanAnswer(pair.answer),
-  }));
+  return input.map((pair, index) => {
+    const aliases = pair.acceptedAnswers ?? [];
+    if (aliases.length >= GAME_CONFIG.maxAcceptedAnswers) {
+      throw new GameError("INVALID_ANSWER", `Use no more than ${GAME_CONFIG.maxAcceptedAnswers - 1} alternative answers per question.`);
+    }
+    const primaryAnswer = cleanAnswer(pair.answer);
+    const seenAnswers = new Set([primaryAnswer.normalizedAnswer]);
+    const acceptedAlternatives = aliases
+      .map(cleanAnswer)
+      .filter((answer) => {
+        if (seenAnswers.has(answer.normalizedAnswer)) return false;
+        seenAnswers.add(answer.normalizedAnswer);
+        return true;
+      });
+    return {
+      id: `host-question-${index + 1}`,
+      question: cleanQuestion(pair.question),
+      primaryAnswer,
+      acceptedAlternatives,
+    };
+  });
 }
 
 export function saveHostSetup(state: PrivateRoomState, playerId: string, input: readonly HostSetupInput[], now: number): void {
@@ -189,7 +300,11 @@ export function revealAnswers(state: PrivateRoomState, now: number, expectedPhas
       state.lastRoundPoints[playerId] = 0;
       return { playerId, nickname: player?.nickname ?? "Player", answer: "No answer", matched: false, pointsAwarded: 0 };
     }
-    const matched = answer.normalizedAnswer === hostQuestion.normalizedAnswer;
+    const acceptedAnswers = [
+      hostQuestion.primaryAnswer.normalizedAnswer,
+      ...hostQuestion.acceptedAlternatives.map((accepted) => accepted.normalizedAnswer),
+    ];
+    const matched = classifyAnswerMatch(answer.normalizedAnswer, acceptedAnswers) !== null;
     const pointsAwarded = matched ? 100 : 0;
     if (player) {
       player.score += pointsAwarded;
@@ -203,7 +318,7 @@ export function revealAnswers(state: PrivateRoomState, now: number, expectedPhas
   state.roundResults.push({
     roundNumber: state.roundNumber,
     questionId: hostQuestion.id,
-    hostAnswer: hostQuestion.rawAnswer,
+    hostAnswer: hostQuestion.primaryAnswer.rawAnswer,
     revealedAnswers,
     scoredAt: now,
     scoredPhaseVersion: expectedPhaseVersion,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AnswerStatus, GamePhase, LeaderboardEntry, Presence, RevealedAnswer, RoomStatus, SetupStatus } from "../game/room-state";
+import { GAME_CONFIG } from "./constants";
 
 const commandBase = z.object({
   commandId: z.string().uuid(),
@@ -9,8 +10,9 @@ const commandBase = z.object({
 });
 
 const setupQuestionSchema = z.object({
-  question: z.string().min(1).max(140),
-  answer: z.string().min(1).max(60),
+  question: z.string().min(1).max(GAME_CONFIG.maxQuestionLength),
+  answer: z.string().min(1).max(GAME_CONFIG.maxAnswerLength),
+  acceptedAnswers: z.array(z.string().min(1).max(GAME_CONFIG.maxAnswerLength)).max(GAME_CONFIG.maxAcceptedAnswers - 1).default([]),
 });
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
@@ -82,7 +84,7 @@ type PublicQuestionSnapshot = Extract<PublicRoomSnapshot, { phase: "question" }>
 type PublicSetupSnapshot = Extract<PublicRoomSnapshot, { phase: "setup" }>;
 
 export type HostSetupRoomSnapshot = PublicSetupSnapshot & {
-  hostSetup: { questions: Array<{ question: string; answer: string }> };
+  hostSetup: { questions: Array<{ question: string; answer: string; acceptedAnswers: string[] }> };
 };
 
 export type HostQuestionRoomSnapshot = PublicQuestionSnapshot & { hostLockedAnswer: string };

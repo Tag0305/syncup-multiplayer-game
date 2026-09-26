@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   GameError,
   advancePhase,
+  classifyAnswerMatch,
+  damerauLevenshtein,
   handleScheduledTransition,
   lockHostSetup,
   normalizeAnswer,
@@ -55,12 +57,39 @@ function submitAndReveal(state: PrivateRoomState, answers: Record<string, string
   expect(revealAnswers(state, now + 100)).toBe(true);
 }
 
+function match(playerAnswer: string, acceptedAnswers: string[]) {
+  return classifyAnswerMatch(normalizeAnswer(playerAnswer), acceptedAnswers.map(normalizeAnswer));
+}
+
 describe("host-authored game engine", () => {
   it("normalizes Unicode, case, spacing, and harmless outer punctuation", () => {
     expect(normalizeAnswer("  ...BIRYANI!!! ")).toBe("biryani");
     expect(normalizeAnswer("Rock-paper-scissors")).toBe("rock-paper-scissors");
     expect(normalizeAnswer("  ‘Ice   Cream’  ")).toBe("ice cream");
     expect(normalizeAnswer("Ｂｉｒｙａｎｉ")).toBe("biryani");
+    expect(normalizeAnswer("Rock—Paper")).toBe("rock-paper");
+  });
+
+  it.each([
+    ["exact", "Biryani", ["Biryani"], "exact"],
+    ["capitalization", "BIRYANI", ["Biryani"], "exact"],
+    ["whitespace", "  biryani  ", ["Biryani"], "exact"],
+    ["outer punctuation", "Biryani!", ["Biryani"], "exact"],
+    ["accepted alternative", "Black", ["Blue", "Black"], "exact"],
+    ["single-word partial", "Biriyani", ["Mutton Biriyani"], "partial"],
+    ["partial phrase", "Fried Rice", ["Chicken Fried Rice"], "partial"],
+    ["one-edit spelling", "Biryani", ["Biriyani"], "typo"],
+    ["missing-letter spelling", "Criket", ["Cricket"], "typo"],
+    ["transposed spelling", "Bangalroe", ["Bangalore"], "typo"],
+    ["different answer", "Pizza", ["Biryani"], null],
+    ["short dangerous fuzzy case", "Glue", ["Blue"], null],
+    ["character substring", "red", ["Bored"], null],
+  ])("matches %s deterministically", (_case, playerAnswer, acceptedAnswers, expected) => {
+    expect(match(playerAnswer as string, acceptedAnswers as string[])).toBe(expected);
+  });
+
+  it("uses adjacent transpositions in the bounded edit-distance calculation", () => {
+    expect(damerauLevenshtein("bangalore", "bangalroe")).toBe(1);
   });
 
   it("creates one immutable host role and begins with blank setup", () => {
@@ -83,13 +112,24 @@ describe("host-authored game engine", () => {
     expect(() => saveHostSetup(state, "p1", setupPairs(), 2_000)).toThrowError(GameError);
     saveHostSetup(state, "host", setupPairs("Pizza"), 2_100);
     saveHostSetup(state, "host", setupPairs("Biryani"), 2_200);
-    expect(state.hostQuestions[0].rawAnswer).toBe("Biryani");
+    expect(state.hostQuestions[0].primaryAnswer.rawAnswer).toBe("Biryani");
     expect(() => lockHostSetup(state, "p1", 2_300)).toThrowError(/original host/i);
     lockHostSetup(state, "host", 2_400);
     expect(state.phase).toBe("lobby");
     expect(state.setupStatus).toBe("locked");
     expect(() => saveHostSetup(state, "host", setupPairs("Changed"), 2_500)).toThrowError();
-    expect(state.hostQuestions[0].rawAnswer).toBe("Biryani");
+    expect(state.hostQuestions[0].primaryAnswer.rawAnswer).toBe("Biryani");
+  });
+
+  it("locks up to four deduplicated accepted alternatives with the primary answer", () => {
+    const state = room();
+    const pairs = setupPairs("Blue");
+    pairs[0] = { ...pairs[0], acceptedAnswers: [" Black ", "BLACK!", "Navy", "Azure"] };
+    saveHostSetup(state, "host", pairs, 2_000);
+    expect(state.hostQuestions[0].acceptedAlternatives.map((answer) => answer.rawAnswer)).toEqual(["Black", "Navy", "Azure"]);
+    const tooMany = setupPairs("Blue");
+    tooMany[0] = { ...tooMany[0], acceptedAnswers: ["Black", "Navy", "Azure", "Teal", "Cyan"] };
+    expect(() => saveHostSetup(room(), "host", tooMany, 2_000)).toThrowError(/no more than 4 alternative/i);
   });
 
   it("allows only the host to start after lock with one connected competitor", () => {
@@ -152,6 +192,19 @@ describe("host-authored game engine", () => {
       { matched: true, pointsAwarded: 100 },
     ]);
     expect(state.players.host.score).toBe(0);
+  });
+
+  it("scores aliases, whole-word partials, and typos once on the server", () => {
+    const state = room(4);
+    const pairs = setupPairs("Mutton Biriyani");
+    pairs[0] = { ...pairs[0], acceptedAnswers: ["Black"] };
+    startPrepared(state, 2_000, pairs);
+    submitAndReveal(state, { p1: "Black", p2: "Biriyani", p3: "Biryani", p4: "Pizza" }, 3_000);
+    expect(state.roundResults[0].revealedAnswers.map((answer) => answer.pointsAwarded)).toEqual([100, 100, 100, 0]);
+    expect(state.players.p1.score).toBe(100);
+    expect(state.players.p2.score).toBe(100);
+    expect(state.players.p3.score).toBe(100);
+    expect(state.players.p4.score).toBe(0);
   });
 
   it("reveals at the 45-second deadline and gives no-answer players zero", () => {

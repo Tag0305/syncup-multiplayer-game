@@ -13,7 +13,7 @@ function PrivacyPolicy() {
       <ul>
         <li><strong>Nickname and room code:</strong> used to identify you inside a room and connect players to the correct game.</li>
         <li><strong>Anonymous player ID and reconnect credential:</strong> generated for your game session so the same player can reconnect after a refresh or brief disconnection.</li>
-        <li><strong>Questions, answers, scores, and game state:</strong> used to store the host's five locked question-and-answer pairs, reveal each answer at the appropriate time, compare player guesses, maintain rankings, and synchronize the room.</li>
+        <li><strong>Questions, answers, scores, and game state:</strong> used to store the host's five locked questions, primary answers, optional accepted answers, reveal each primary answer at the appropriate time, compare player guesses, maintain rankings, and synchronize the room.</li>
         <li><strong>Technical request information:</strong> Cloudflare may process information such as IP address, request details, and operational logs while providing hosting, security, WebSockets, Durable Objects, and observability.</li>
       </ul>
 
@@ -21,10 +21,10 @@ function PrivacyPolicy() {
       <p>Your browser stores the room code, anonymous player ID, and reconnect token in localStorage. This lets SyncUp restore the same room session after a refresh or browser restart. Choosing Leave or Exit to Home removes that saved session from the browser.</p>
 
       <h2>Room and game data</h2>
-      <p>The authoritative room state is stored in a Cloudflare Durable Object. The server stores a hash of the reconnect token, not the raw token. Room state includes players, host-created questions and locked answers, submitted guesses, scores, timers, and game progress. Rooms have a maximum active lifetime of 24 hours. This is not a promise that all infrastructure logs or stored records are deleted at exactly that time.</p>
+      <p>The authoritative room state is stored in a Cloudflare Durable Object. The server stores a hash of the reconnect token, not the raw token. Room state includes players, host-created questions, locked primary and accepted answers, submitted guesses, scores, timers, and game progress. Rooms have a maximum active lifetime of 24 hours. This is not a promise that all infrastructure logs or stored records are deleted at exactly that time.</p>
 
       <h2>Answer visibility</h2>
-      <p>The host's locked answers and submitted player guesses are kept out of player-facing room snapshots before reveal. The current host answer and player guesses are revealed to room participants together when that round moves to the reveal phase. Future host answers remain private.</p>
+      <p>The host's locked primary and accepted answers and submitted player guesses are kept out of player-facing room snapshots before reveal. The current primary host answer and player guesses are revealed to room participants together when that round moves to the reveal phase. Accepted alternatives and future host answers remain private.</p>
 
       <h2>Analytics and advertising</h2>
       <p>The current SyncUp code does not include an advertising system or a third-party product analytics or tracking SDK. Cloudflare observability is enabled for operational monitoring.</p>

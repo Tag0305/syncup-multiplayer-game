@@ -94,7 +94,7 @@ function command(session: PlayerSession, type: CommandType, commandId = crypto.r
 }
 
 function setupPairs() {
-  return Array.from({ length: 5 }, (_, index) => ({ question: `Host question ${index + 1}?`, answer: `Locked answer ${index + 1}` }));
+  return Array.from({ length: 5 }, (_, index) => ({ question: `Host question ${index + 1}?`, answer: `Locked answer ${index + 1}`, acceptedAnswers: [] as string[] }));
 }
 
 async function setupAndLock(host: SocketClient, session: PlayerSession, phaseVersion: number, questions = setupPairs()) {
@@ -236,12 +236,15 @@ describe("authoritative host-answer game", () => {
     const connected = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "setup" && message.snapshot.players.every((player) => player.presence === "connected"));
     if (connected.type !== "ROOM_SNAPSHOT" || connected.snapshot.phase !== "setup") throw new Error("Expected setup snapshot");
     const questions = setupPairs();
+    questions[0].acceptedAnswers = ["Private accepted alias"];
     host.send(command(room.session, "SAVE_SETUP", crypto.randomUUID(), connected.snapshot.phaseVersion, { questions }));
     const hostSaved = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "setup" && message.snapshot.phaseVersion > connected.snapshot.phaseVersion);
     if (hostSaved.type !== "ROOM_SNAPSHOT" || hostSaved.snapshot.phase !== "setup") throw new Error("Expected host setup snapshot");
     expect("hostSetup" in hostSaved.snapshot && hostSaved.snapshot.hostSetup.questions[0].answer).toBe("Locked answer 1");
+    expect("hostSetup" in hostSaved.snapshot && hostSaved.snapshot.hostSetup.questions[0].acceptedAnswers).toEqual(["Private accepted alias"]);
     const playerSaved = await guest.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "setup" && message.snapshot.phaseVersion === hostSaved.snapshot.phaseVersion);
     expect(JSON.stringify(playerSaved)).not.toContain("Locked answer");
+    expect(JSON.stringify(playerSaved)).not.toContain("Private accepted alias");
     expect(JSON.stringify(playerSaved)).not.toContain("normalizedAnswer");
 
     const lockId = crypto.randomUUID();
@@ -306,7 +309,7 @@ describe("authoritative host-answer game", () => {
     first.send(command(firstJoin.data.session, "SUBMIT_ANSWER", answerId, hostQuestion.phaseVersion, { answer: "Different" }));
     const duplicate = await first.next((message) => message.type === "COMMAND_ACCEPTED" && message.commandId === answerId && message.duplicate === true);
     expect(duplicate.type).toBe("COMMAND_ACCEPTED");
-    second.send(command(secondJoin.data.session, "SUBMIT_ANSWER", crypto.randomUUID(), hostQuestion.phaseVersion, { answer: "Different" }));
+    second.send(command(secondJoin.data.session, "SUBMIT_ANSWER", crypto.randomUUID(), hostQuestion.phaseVersion, { answer: "Different", matched: true, score: 500 }));
     const reveal = await host.next((message) => message.type === "ROOM_SNAPSHOT" && message.snapshot.phase === "reveal");
     if (reveal.type !== "ROOM_SNAPSHOT" || reveal.snapshot.phase !== "reveal") throw new Error("Expected reveal snapshot");
     expect(reveal.snapshot.hostAnswer).toBe("Locked answer 1");
