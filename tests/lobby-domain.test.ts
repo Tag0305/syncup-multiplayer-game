@@ -54,7 +54,7 @@ describe("lobby domain", () => {
     expect(state.players.p1.presence).toBe("reconnecting");
   });
 
-  it("transfers host after the grace period to the earliest connected player", () => {
+  it("expires a disconnected host without promoting a player", () => {
     const state = room();
     markPlayerConnected(state, "p1", 1_100);
     addPlayer(state, player("p2", "Leo", 2), 1_200);
@@ -63,16 +63,22 @@ describe("lobby domain", () => {
     markPlayerConnected(state, "p3", 1_500);
     markPlayerDisconnected(state, "p1", 2_000);
     const result = expireDisconnectedPlayers(state, 32_000);
-    expect(result.hostChanged).toBe(true);
-    expect(state.hostPlayerId).toBe("p2");
+    expect(result.hostChanged).toBe(false);
+    expect(state.hostPlayerId).toBe("p1");
+    expect(state.originalHostPlayerId).toBe("p1");
+    expect(state.players.p1.presence).toBe("left");
+    expect(state.players.p2.role).toBe("player");
   });
 
-  it("transfers host immediately on explicit leave", () => {
+  it("keeps the original host identity after explicit host leave", () => {
     const state = room();
     addPlayer(state, player("p2", "Leo", 2), 1_200);
     markPlayerConnected(state, "p2", 1_300);
     const result = leavePlayer(state, "p1", 2_000);
-    expect(result.hostChanged).toBe(true);
-    expect(state.hostPlayerId).toBe("p2");
+    expect(result.hostChanged).toBe(false);
+    expect(state.hostPlayerId).toBe("p1");
+    expect(state.originalHostPlayerId).toBe("p1");
+    expect(state.players.p1.presence).toBe("left");
+    expect(state.players.p2.role).toBe("player");
   });
 });

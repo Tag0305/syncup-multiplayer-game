@@ -1,20 +1,27 @@
 import { GAME_CONFIG } from "../protocol/constants";
-import type { AnswerState, PrivateRoomState, RevealedAnswer } from "./room-state";
-import { QUESTION_BANK, QUESTION_BY_ID, type GameQuestion } from "./questions";
+import type { AnswerState, HostQuestionState, PrivateRoomState, RevealedAnswer } from "./room-state";
 
 export type GameErrorCode =
   | "HOST_ONLY"
+  | "SETUP_INCOMPLETE"
+  | "SETUP_LOCKED"
   | "NOT_ENOUGH_PLAYERS"
   | "INVALID_PHASE"
   | "PLAYER_NOT_ELIGIBLE"
   | "ANSWER_ALREADY_SUBMITTED"
-  | "INVALID_ANSWER";
+  | "INVALID_ANSWER"
+  | "INVALID_QUESTION";
 
 export class GameError extends Error {
   constructor(public readonly code: GameErrorCode, message: string) {
     super(message);
     this.name = "GameError";
   }
+}
+
+export interface HostSetupInput {
+  question: string;
+  answer: string;
 }
 
 export function normalizeAnswer(value: string): string {
@@ -30,40 +37,64 @@ export function normalizeAnswer(value: string): string {
 
 export function cleanAnswer(value: string): { rawAnswer: string; normalizedAnswer: string } {
   const rawAnswer = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
-  if (!rawAnswer || rawAnswer.length > GAME_CONFIG.maxAnswerLength) {
-    throw new GameError("INVALID_ANSWER", `Answer must be 1–${GAME_CONFIG.maxAnswerLength} characters.`);
+  if (!rawAnswer || rawAnswer.length > GAME_CONFIG.maxAnswerLength || /[\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]/u.test(rawAnswer)) {
+    throw new GameError("INVALID_ANSWER", `Answer must be 1 to ${GAME_CONFIG.maxAnswerLength} characters.`);
   }
   const normalizedAnswer = normalizeAnswer(rawAnswer);
   if (!normalizedAnswer) throw new GameError("INVALID_ANSWER", "Answer must contain letters or numbers.");
   return { rawAnswer, normalizedAnswer };
 }
 
-export function pointsForMatchSize(size: number): number {
-  if (size <= 1) return 0;
-  if (size === 2) return 100;
-  if (size === 3) return 200;
-  return 300;
-}
-
-export function selectQuestions(
-  previouslyUsedIds: readonly string[],
-  count = GAME_CONFIG.totalRounds,
-  random: () => number = Math.random,
-): GameQuestion[] {
-  const used = new Set(previouslyUsedIds);
-  let candidates = QUESTION_BANK.filter((question) => !used.has(question.id));
-  if (candidates.length < count) candidates = [...QUESTION_BANK];
-  const shuffled = [...candidates];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+export function cleanQuestion(value: string): string {
+  const question = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  if (!question || question.length > GAME_CONFIG.maxQuestionLength || /[\u0000-\u001F\u007F\u202A-\u202E\u2066-\u2069]/u.test(question)) {
+    throw new GameError("INVALID_QUESTION", `Question must be 1 to ${GAME_CONFIG.maxQuestionLength} visible characters.`);
   }
-  return shuffled.slice(0, count);
+  return question;
 }
 
-function activePlayers(state: PrivateRoomState) {
+function assertHost(state: PrivateRoomState, playerId: string): void {
+  if (state.originalHostPlayerId !== playerId) throw new GameError("HOST_ONLY", "Only the original host can do that.");
+}
+
+function prepareHostQuestions(input: readonly HostSetupInput[]): HostQuestionState[] {
+  if (input.length !== GAME_CONFIG.totalRounds) {
+    throw new GameError("SETUP_INCOMPLETE", "Complete exactly five questions and secret answers.");
+  }
+  return input.map((pair, index) => ({
+    id: `host-question-${index + 1}`,
+    question: cleanQuestion(pair.question),
+    ...cleanAnswer(pair.answer),
+  }));
+}
+
+export function saveHostSetup(state: PrivateRoomState, playerId: string, input: readonly HostSetupInput[], now: number): void {
+  assertHost(state, playerId);
+  if (state.phase !== "setup" || state.status !== "lobby") throw new GameError("INVALID_PHASE", "Game setup is not available now.");
+  if (state.setupStatus === "locked") throw new GameError("SETUP_LOCKED", "Questions and answers are already locked.");
+  state.hostQuestions = prepareHostQuestions(input);
+  state.phaseVersion += 1;
+  state.updatedAt = now;
+  state.eventSequence += 1;
+}
+
+export function lockHostSetup(state: PrivateRoomState, playerId: string, now: number): void {
+  assertHost(state, playerId);
+  if (state.phase !== "setup" || state.status !== "lobby") throw new GameError("INVALID_PHASE", "Game setup cannot be locked now.");
+  if (state.setupStatus === "locked") return;
+  if (state.hostQuestions.length !== GAME_CONFIG.totalRounds) {
+    throw new GameError("SETUP_INCOMPLETE", "Complete and review all five questions and secret answers before locking.");
+  }
+  state.setupStatus = "locked";
+  state.phase = "lobby";
+  state.phaseVersion += 1;
+  state.updatedAt = now;
+  state.eventSequence += 1;
+}
+
+function competingPlayers(state: PrivateRoomState) {
   return Object.values(state.players)
-    .filter((player) => player.presence !== "left")
+    .filter((player) => player.role === "player" && player.presence !== "left")
     .sort((a, b) => a.joinOrder - b.joinOrder);
 }
 
@@ -77,13 +108,12 @@ function setTransition(
 }
 
 function beginQuestion(state: PrivateRoomState, roundNumber: number, now: number): void {
-  const questionId = state.selectedQuestionIds[roundNumber - 1];
-  const question = QUESTION_BY_ID.get(questionId);
-  if (!question) throw new Error("Selected question is missing from the question bank");
+  const lockedQuestion = state.hostQuestions[roundNumber - 1];
+  if (!lockedQuestion) throw new Error("Locked host question is missing");
   state.roundNumber = roundNumber;
   state.phase = "question";
   state.status = "playing";
-  state.currentQuestion = question;
+  state.currentQuestion = { id: lockedQuestion.id, text: lockedQuestion.question };
   state.eligiblePlayerIds = state.gamePlayerIds.filter((id) => state.players[id]?.presence !== "left");
   state.answers = {};
   state.lastRoundPoints = {};
@@ -96,42 +126,45 @@ function beginQuestion(state: PrivateRoomState, roundNumber: number, now: number
 }
 
 export function startGame(state: PrivateRoomState, playerId: string, now: number): void {
-  if (state.hostPlayerId !== playerId) throw new GameError("HOST_ONLY", "Only the host can start the game.");
-  if (state.phase !== "lobby" || state.status !== "lobby") throw new GameError("INVALID_PHASE", "The game has already started.");
-  const players = activePlayers(state);
-  if (players.length < GAME_CONFIG.minPlayers) throw new GameError("NOT_ENOUGH_PLAYERS", "At least two players are required.");
-  const questions = selectQuestions(state.usedQuestionIds);
+  assertHost(state, playerId);
+  if (state.phase !== "lobby" || state.status !== "lobby") throw new GameError("INVALID_PHASE", "The game cannot start from this screen.");
+  if (state.setupStatus !== "locked" || state.hostQuestions.length !== GAME_CONFIG.totalRounds) {
+    throw new GameError("SETUP_INCOMPLETE", "Lock all five questions and answers before starting.");
+  }
+  const players = competingPlayers(state);
+  if (!players.some((player) => player.presence === "connected")) {
+    throw new GameError("NOT_ENOUGH_PLAYERS", "At least one participating player must be connected.");
+  }
   state.gameNumber += 1;
   state.gamePlayerIds = players.map((player) => player.playerId);
-  state.selectedQuestionIds = questions.map((question) => question.id);
-  state.usedQuestionIds = [...new Set([...state.usedQuestionIds, ...state.selectedQuestionIds])];
   state.roundResults = [];
   state.scoredPhaseVersions = [];
-  for (const player of players) {
+  state.answers = {};
+  for (const player of Object.values(state.players)) {
     player.score = 0;
     player.roundsAnswered = 0;
     player.matchedRounds = 0;
+    player.currentAnswerStatus = "not_submitted";
   }
   beginQuestion(state, 1, now);
 }
 
 export function submitAnswer(state: PrivateRoomState, playerId: string, answer: string, now: number): boolean {
   if (state.phase !== "question") throw new GameError("INVALID_PHASE", "Answers are not being accepted right now.");
-  if (!state.eligiblePlayerIds.includes(playerId) || state.players[playerId]?.presence === "left") {
-    throw new GameError("PLAYER_NOT_ELIGIBLE", "You are not eligible to answer this round.");
+  if (state.phaseEndsAt === null || now >= state.phaseEndsAt) {
+    throw new GameError("INVALID_PHASE", "Answer time has expired.");
   }
-  if (state.answers[playerId] || state.players[playerId].currentAnswerStatus === "submitted") {
+  const player = state.players[playerId];
+  if (!player || player.role !== "player" || !state.eligiblePlayerIds.includes(playerId) || player.presence === "left") {
+    throw new GameError("PLAYER_NOT_ELIGIBLE", "Only participating players can answer this round.");
+  }
+  if (state.answers[playerId] || player.currentAnswerStatus === "submitted") {
     throw new GameError("ANSWER_ALREADY_SUBMITTED", "Your answer is already locked in.");
   }
   const cleaned = cleanAnswer(answer);
-  state.answers[playerId] = {
-    playerId,
-    ...cleaned,
-    submittedAt: now,
-    phaseVersion: state.phaseVersion,
-  } satisfies AnswerState;
-  state.players[playerId].currentAnswerStatus = "submitted";
-  state.players[playerId].roundsAnswered += 1;
+  state.answers[playerId] = { playerId, ...cleaned, submittedAt: now, phaseVersion: state.phaseVersion } satisfies AnswerState;
+  player.currentAnswerStatus = "submitted";
+  player.roundsAnswered += 1;
   state.updatedAt = now;
   state.eventSequence += 1;
   return allRequiredAnswersSubmitted(state);
@@ -139,40 +172,38 @@ export function submitAnswer(state: PrivateRoomState, playerId: string, answer: 
 
 export function allRequiredAnswersSubmitted(state: PrivateRoomState): boolean {
   const required = state.eligiblePlayerIds.filter((id) => state.players[id]?.presence !== "left");
-  return required.length > 0 && required.every((id) => Boolean(state.answers[id]));
+  return required.every((id) => Boolean(state.answers[id]));
 }
 
 export function revealAnswers(state: PrivateRoomState, now: number, expectedPhaseVersion = state.phaseVersion): boolean {
   if (state.phase !== "question" || state.phaseVersion !== expectedPhaseVersion) return false;
   if (state.scoredPhaseVersions.includes(expectedPhaseVersion)) return false;
-  const groups = new Map<string, AnswerState[]>();
-  for (const answer of Object.values(state.answers)) {
-    if (answer.phaseVersion !== expectedPhaseVersion || !state.eligiblePlayerIds.includes(answer.playerId)) continue;
-    const group = groups.get(answer.normalizedAnswer) ?? [];
-    group.push(answer);
-    groups.set(answer.normalizedAnswer, group);
-  }
+  const hostQuestion = state.hostQuestions[state.roundNumber - 1];
+  if (!hostQuestion) throw new Error("Host answer is missing for current round");
+
   const revealedAnswers: RevealedAnswer[] = state.eligiblePlayerIds.map((playerId) => {
     const player = state.players[playerId];
     const answer = state.answers[playerId];
     if (!answer) {
       if (player) player.currentAnswerStatus = "timed_out";
       state.lastRoundPoints[playerId] = 0;
-      return { playerId, nickname: player?.nickname ?? "Player", answer: "No answer", matchSize: 0, pointsAwarded: 0, normalizedGroup: null };
+      return { playerId, nickname: player?.nickname ?? "Player", answer: "No answer", matched: false, pointsAwarded: 0 };
     }
-    const matchSize = groups.get(answer.normalizedAnswer)?.length ?? 1;
-    const pointsAwarded = pointsForMatchSize(matchSize);
+    const matched = answer.normalizedAnswer === hostQuestion.normalizedAnswer;
+    const pointsAwarded = matched ? 100 : 0;
     if (player) {
       player.score += pointsAwarded;
-      if (pointsAwarded > 0) player.matchedRounds += 1;
+      if (matched) player.matchedRounds += 1;
     }
     state.lastRoundPoints[playerId] = pointsAwarded;
-    return { playerId, nickname: player?.nickname ?? "Player", answer: answer.rawAnswer, matchSize, pointsAwarded, normalizedGroup: answer.normalizedAnswer };
+    return { playerId, nickname: player?.nickname ?? "Player", answer: answer.rawAnswer, matched, pointsAwarded };
   });
+
   state.scoredPhaseVersions.push(expectedPhaseVersion);
   state.roundResults.push({
     roundNumber: state.roundNumber,
-    questionId: state.currentQuestion?.id ?? "unknown",
+    questionId: hostQuestion.id,
+    hostAnswer: hostQuestion.rawAnswer,
     revealedAnswers,
     scoredAt: now,
     scoredPhaseVersion: expectedPhaseVersion,
@@ -212,26 +243,35 @@ export function advancePhase(state: PrivateRoomState, now: number): boolean {
   return true;
 }
 
-export function playAgain(state: PrivateRoomState, playerId: string, now: number): void {
-  if (state.hostPlayerId !== playerId) throw new GameError("HOST_ONLY", "Only the host can start another game.");
-  if (state.phase !== "final" || state.status !== "finished") throw new GameError("INVALID_PHASE", "Play Again is available after the final results.");
-  const players = activePlayers(state);
-  if (players.length < GAME_CONFIG.minPlayers) throw new GameError("NOT_ENOUGH_PLAYERS", "At least two players are required.");
-  const questions = selectQuestions(state.usedQuestionIds);
-  state.gameNumber += 1;
-  state.gamePlayerIds = players.map((player) => player.playerId);
-  state.selectedQuestionIds = questions.map((question) => question.id);
-  state.usedQuestionIds = [...new Set([...state.usedQuestionIds, ...state.selectedQuestionIds])];
+export function setUpAnotherGame(state: PrivateRoomState, playerId: string, now: number): void {
+  assertHost(state, playerId);
+  if (state.phase !== "final" || state.status !== "finished") {
+    throw new GameError("INVALID_PHASE", "Another game can be prepared after final results.");
+  }
+  state.status = "lobby";
+  state.phase = "setup";
+  state.setupStatus = "editing";
+  state.hostQuestions = [];
+  state.roundNumber = 0;
+  state.phaseVersion += 1;
+  state.phaseStartedAt = null;
+  state.phaseEndsAt = null;
+  state.currentQuestion = null;
+  state.gamePlayerIds = [];
+  state.eligiblePlayerIds = [];
+  state.answers = {};
   state.roundResults = [];
   state.scoredPhaseVersions = [];
-  state.answers = {};
-  for (const player of players) {
+  state.lastRoundPoints = {};
+  state.scheduledTransition = null;
+  for (const player of Object.values(state.players)) {
     player.score = 0;
     player.roundsAnswered = 0;
     player.matchedRounds = 0;
     player.currentAnswerStatus = "not_submitted";
   }
-  beginQuestion(state, 1, now);
+  state.updatedAt = now;
+  state.eventSequence += 1;
 }
 
 export function handleScheduledTransition(state: PrivateRoomState, now: number): boolean {

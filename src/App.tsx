@@ -1,6 +1,7 @@
 import { useRoomLobby } from "./api/useRoomLobby";
 import { Brand } from "./components/Brand";
 import { HomeScreen } from "./components/HomeScreen";
+import { HostSetupScreen } from "./components/HostSetupScreen";
 import { LobbyScreen } from "./components/LobbyScreen";
 import { LegalPage } from "./components/LegalPage";
 import { QuestionScreen } from "./components/QuestionScreen";
@@ -30,13 +31,16 @@ function GameApp() {
           <p>Getting the latest lobby state.</p>
         </main>
       )}
+      {room.session && room.snapshot && room.snapshot.phase === "setup" && (
+        <HostSetupScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} connectionState={room.connectionState} commandBusy={room.commandBusy} onSave={room.saveSetup} onLock={room.lockSetup} onLeave={room.leave} />
+      )}
       {room.session && room.snapshot && room.snapshot.phase === "lobby" && (
         <LobbyScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} connectionState={room.connectionState} commandBusy={room.commandBusy} onStart={room.startGame} onLeave={room.leave} />
       )}
       {room.session && room.snapshot?.phase === "question" && <QuestionScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} connectionState={room.connectionState} commandBusy={room.commandBusy} onSubmit={room.submitAnswer} />}
       {room.session && room.snapshot?.phase === "reveal" && <RevealScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onContinue={room.advancePhase} />}
       {room.session && room.snapshot?.phase === "leaderboard" && <LeaderboardScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onContinue={room.advancePhase} />}
-      {room.session && room.snapshot?.phase === "final" && <FinalScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onReplay={room.playAgain} onExit={room.leave} />}
+      {room.session && room.snapshot?.phase === "final" && <FinalScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onNewGame={room.setUpAnotherGame} onExit={room.leave} />}
       {room.session && room.snapshot?.phase !== "lobby" && room.connectionState !== "connected" && (
         <div className="connection-notice" role="status" aria-live="polite">Connection interrupted. Reconnecting to your game…</div>
       )}

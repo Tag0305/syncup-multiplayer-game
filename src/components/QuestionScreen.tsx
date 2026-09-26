@@ -1,7 +1,7 @@
 import { CheckCircle2, Clock3, Send, WifiOff } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ConnectionState } from "../api/useRoomLobby";
-import type { PublicRoomSnapshot } from "../protocol/messages";
+import type { ClientRoomSnapshot } from "../protocol/messages";
 
 function useCountdown(phaseEndsAt: number, serverNow: number) {
   const offset = useMemo(() => serverNow - Date.now(), [serverNow]);
@@ -16,7 +16,7 @@ function useCountdown(phaseEndsAt: number, serverNow: number) {
 }
 
 interface Props {
-  snapshot: Extract<PublicRoomSnapshot, { phase: "question" }>;
+  snapshot: Extract<ClientRoomSnapshot, { phase: "question" }>;
   currentPlayerId: string;
   connectionState: ConnectionState;
   commandBusy: boolean;
@@ -26,6 +26,7 @@ interface Props {
 export function QuestionScreen({ snapshot, currentPlayerId, connectionState, commandBusy, onSubmit }: Props) {
   const [answer, setAnswer] = useState("");
   const currentPlayer = snapshot.players.find((player) => player.playerId === currentPlayerId);
+  const isHost = snapshot.hostPlayerId === currentPlayerId;
   const submitted = currentPlayer?.answerStatus === "submitted";
   const seconds = useCountdown(snapshot.phaseEndsAt, snapshot.serverNow);
   const submit = async () => {
@@ -39,18 +40,30 @@ export function QuestionScreen({ snapshot, currentPlayerId, connectionState, com
       <div className="round-progress"><i style={{ width: `${snapshot.roundNumber / snapshot.totalRounds * 100}%` }} /></div>
       <section className="question-card">
         <div className="question-number">{String(snapshot.roundNumber).padStart(2, "0")}</div>
-        <p>{snapshot.question.text}</p>
-        <h1>{submitted ? "Answer locked." : "What comes to mind?"}</h1>
-        <label className="answer-field">
-          <span className="sr-only">Your answer</span>
-          <input value={answer} disabled={submitted || commandBusy} maxLength={60} aria-describedby="answer-limit" onChange={(event) => setAnswer(event.target.value.slice(0, 60))} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} placeholder="Type your answer…" autoFocus />
-          <small id="answer-limit">{answer.length}/60</small>
-        </label>
-        <button className="primary-button" disabled={!answer.trim() || submitted || commandBusy || connectionState !== "connected"} onClick={() => void submit()}>
-          {submitted ? <><CheckCircle2 size={19} /> Answer locked</> : connectionState !== "connected" ? <><WifiOff size={18} /> Reconnecting…</> : <>Lock it in <Send size={18} /></>}
-        </button>
+        <p>QUESTION</p>
+        <h1>{snapshot.question.text}</h1>
+        {isHost ? (
+          <div className="host-round-state">
+            <span>Your answer is locked.</span>
+            {"hostLockedAnswer" in snapshot && <strong>{snapshot.hostLockedAnswer}</strong>}
+            <p>Players are guessing the answer you chose.</p>
+          </div>
+        ) : (
+          <>
+            <p className="guess-instruction">Guess the answer {snapshot.hostName} already chose. The host's answer is locked.</p>
+            <label className="answer-field">
+              <span className="sr-only">Your answer</span>
+              <input value={answer} disabled={submitted || commandBusy} maxLength={60} aria-describedby="answer-limit" onChange={(event) => setAnswer(event.target.value.slice(0, 60))} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} placeholder="Your guess" autoFocus />
+              <small id="answer-limit">{answer.length}/60</small>
+            </label>
+            <button className="primary-button" disabled={!answer.trim() || submitted || commandBusy || connectionState !== "connected"} onClick={() => void submit()}>
+              {submitted ? <><CheckCircle2 size={19} /> Answer locked in</> : connectionState !== "connected" ? <><WifiOff size={18} /> Reconnecting…</> : <>Submit answer <Send size={18} /></>}
+            </button>
+            {submitted && <p className="submitted-message">Waiting for the other players.</p>}
+          </>
+        )}
       </section>
-      <div className="submission-strip" aria-live="polite"><span><i className="submitted-dot" /> {snapshot.submissionProgress.submittedCount} of {snapshot.submissionProgress.eligibleCount} answered</span><p>Your answer stays private until everyone is ready.</p></div>
+      <div className="submission-strip" aria-live="polite"><span><i className="submitted-dot" /> {snapshot.submissionProgress.submittedCount} of {snapshot.submissionProgress.eligibleCount} players answered</span><p>{isHost ? "The reveal starts when all players answer or time expires." : "Your answer stays private until the reveal."}</p></div>
     </main>
   );
 }

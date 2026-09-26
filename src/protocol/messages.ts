@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AnswerStatus, GamePhase, LeaderboardEntry, Presence, RoomStatus, RevealedAnswer } from "../game/room-state";
+import type { AnswerStatus, GamePhase, LeaderboardEntry, Presence, RevealedAnswer, RoomStatus, SetupStatus } from "../game/room-state";
 
 const commandBase = z.object({
   commandId: z.string().uuid(),
@@ -8,12 +8,19 @@ const commandBase = z.object({
   expectedPhaseVersion: z.number().int().nonnegative(),
 });
 
+const setupQuestionSchema = z.object({
+  question: z.string().min(1).max(140),
+  answer: z.string().min(1).max(60),
+});
+
 export const clientCommandSchema = z.discriminatedUnion("type", [
   commandBase.extend({ type: z.literal("REQUEST_SNAPSHOT") }),
+  commandBase.extend({ type: z.literal("SAVE_SETUP"), questions: z.array(setupQuestionSchema).length(5) }),
+  commandBase.extend({ type: z.literal("LOCK_SETUP") }),
   commandBase.extend({ type: z.literal("START_GAME") }),
   commandBase.extend({ type: z.literal("SUBMIT_ANSWER"), answer: z.string().min(1).max(60) }),
   commandBase.extend({ type: z.literal("ADVANCE_PHASE") }),
-  commandBase.extend({ type: z.literal("PLAY_AGAIN") }),
+  commandBase.extend({ type: z.literal("SET_UP_ANOTHER_GAME") }),
   commandBase.extend({ type: z.literal("LEAVE_ROOM") }),
   commandBase.extend({ type: z.literal("PING"), clientNow: z.number() }),
 ]);
@@ -37,11 +44,15 @@ interface PublicSnapshotBase {
   phaseVersion: number;
   eventSequence: number;
   serverNow: number;
-  hostPlayerId: string | null;
+  hostPlayerId: string;
+  hostName: string;
+  setupStatus: SetupStatus;
   players: PublicPlayer[];
 }
 
 export type PublicRoomSnapshot =
+  | (PublicSnapshotBase & { phase: "setup"; phaseEndsAt: null })
+  | (PublicSnapshotBase & { phase: "lobby"; phaseEndsAt: null })
   | (PublicSnapshotBase & {
       phase: "question";
       question: { id: string; text: string };
@@ -51,8 +62,9 @@ export type PublicRoomSnapshot =
   | (PublicSnapshotBase & {
       phase: "reveal";
       question: { id: string; text: string } | null;
-      phaseEndsAt: number | null;
+      hostAnswer: string;
       revealedAnswers: RevealedAnswer[];
+      phaseEndsAt: number | null;
     })
   | (PublicSnapshotBase & {
       phase: "leaderboard";
@@ -64,16 +76,24 @@ export type PublicRoomSnapshot =
       phaseEndsAt: null;
       leaderboard: LeaderboardEntry[];
       winnerPlayerIds: string[];
-    })
-  | (PublicSnapshotBase & {
-      phase: Exclude<GamePhase, "question" | "reveal" | "leaderboard" | "final">;
-      phaseEndsAt: number | null;
     });
 
+type PublicQuestionSnapshot = Extract<PublicRoomSnapshot, { phase: "question" }>;
+type PublicSetupSnapshot = Extract<PublicRoomSnapshot, { phase: "setup" }>;
+
+export type HostSetupRoomSnapshot = PublicSetupSnapshot & {
+  hostSetup: { questions: Array<{ question: string; answer: string }> };
+};
+
+export type HostQuestionRoomSnapshot = PublicQuestionSnapshot & { hostLockedAnswer: string };
+
+export type ClientRoomSnapshot = PublicRoomSnapshot | HostSetupRoomSnapshot | HostQuestionRoomSnapshot;
+
 export type ServerMessage =
-  | { type: "ROOM_SNAPSHOT"; snapshot: PublicRoomSnapshot }
+  | { type: "ROOM_SNAPSHOT"; snapshot: ClientRoomSnapshot }
   | { type: "COMMAND_ACCEPTED"; commandId: string; eventSequence: number; duplicate?: boolean }
-  | { type: "HOST_CHANGED"; hostPlayerId: string | null; eventSequence: number }
   | { type: "COMMAND_REJECTED"; commandId: string; code: string; message: string }
   | { type: "RESYNC_REQUIRED"; expectedEventSequence: number }
   | { type: "PONG"; serverNow: number; clientNow: number };
+
+export type { GamePhase };

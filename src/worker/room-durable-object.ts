@@ -17,12 +17,14 @@ import {
   advancePhase,
   allRequiredAnswersSubmitted,
   handleScheduledTransition,
-  playAgain,
+  lockHostSetup,
   revealAnswers,
+  saveHostSetup,
+  setUpAnotherGame,
   startGame,
   submitAnswer,
 } from "../game/game-engine";
-import { toPublicSnapshot, type PrivateRoomState, type SocketTicketState } from "../game/room-state";
+import { toClientSnapshot, type PrivateRoomState, type SocketTicketState } from "../game/room-state";
 import { clientCommandSchema, type ClientCommand, type ServerMessage } from "../protocol/messages";
 import { createSecret, hashSecret, secretsEqual } from "./security";
 
@@ -78,16 +80,27 @@ function playerTag(playerId: string): string {
 }
 
 function upgradeState(state: PrivateRoomState): PrivateRoomState {
-  const legacy = state as PrivateRoomState & {
-    gamePlayerIds?: string[];
-    lastRoundPoints?: Record<string, number>;
-    scheduledTransition?: PrivateRoomState["scheduledTransition"];
-  };
-  legacy.schemaVersion = 2;
-  legacy.gamePlayerIds ??= [];
-  legacy.lastRoundPoints ??= {};
-  legacy.scheduledTransition ??= null;
-  return legacy;
+  const candidate = state as unknown as Record<string, unknown>;
+  if (candidate.schemaVersion !== 3) {
+    const originalHostPlayerId = typeof candidate.hostPlayerId === "string" ? candidate.hostPlayerId : "";
+    candidate.schemaVersion = 3;
+    candidate.originalHostPlayerId = originalHostPlayerId;
+    candidate.hostPlayerId = originalHostPlayerId;
+    candidate.setupStatus = "editing";
+    candidate.hostQuestions = [];
+    candidate.gamePlayerIds ??= [];
+    candidate.lastRoundPoints ??= {};
+    candidate.scheduledTransition ??= null;
+    if (candidate.phase === "lobby") {
+      candidate.phase = "setup";
+      candidate.status = "lobby";
+    } else {
+      // Pre-conversion games cannot be reconstructed because they have no
+      // locked host-authored answers. Their clients must create a new room.
+      candidate.status = "closed";
+    }
+  }
+  return candidate as unknown as PrivateRoomState;
 }
 
 export class RoomDurableObject extends DurableObject<Env> {
@@ -114,26 +127,27 @@ export class RoomDurableObject extends DurableObject<Env> {
     const storedState = await this.ctx.storage.get<PrivateRoomState>(STATE_KEY);
     const state = storedState ? upgradeState(storedState) : undefined;
     if (!state) return;
+    if (state.status === "closed") {
+      for (const socket of this.ctx.getWebSockets()) socket.close(4000, "Room closed");
+      return;
+    }
 
     if (state.expiresAt <= now) {
-      if (state.status !== "closed") {
-        state.status = "closed";
-        state.updatedAt = now;
-        state.eventSequence += 1;
-        await this.ctx.storage.put(STATE_KEY, state);
-        this.broadcastSnapshot(state);
-      }
+      state.status = "closed";
+      state.updatedAt = now;
+      state.eventSequence += 1;
+      await this.ctx.storage.put(STATE_KEY, state);
+      this.broadcastSnapshot(state);
       for (const socket of this.ctx.getWebSockets()) socket.close(4000, "Room expired");
       return;
     }
 
-    const { changed, hostChanged } = expireDisconnectedPlayers(state, now);
+    const { changed } = expireDisconnectedPlayers(state, now);
     const phaseChanged = handleScheduledTransition(state, now)
       || (changed && state.phase === "question" && allRequiredAnswersSubmitted(state) && revealAnswers(state, now));
     await this.deleteExpiredTickets(now);
     if (changed || phaseChanged) {
       await this.ctx.storage.put(STATE_KEY, state);
-      if (hostChanged) this.broadcast({ type: "HOST_CHANGED", hostPlayerId: state.hostPlayerId, eventSequence: state.eventSequence });
       this.broadcastSnapshot(state);
     }
     await this.scheduleNextAlarm(state);
@@ -197,7 +211,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     if (!claimed || !state) return jsonError("ROOM_CODE_COLLISION", "Room code is already in use.", 409);
     await this.scheduleNextAlarm(state);
     return Response.json(
-      { roomCode: input.roomCode, session: { roomCode: input.roomCode, playerId, reconnectToken }, snapshot: toPublicSnapshot(state, input.now) },
+      { roomCode: input.roomCode, session: { roomCode: input.roomCode, playerId, reconnectToken }, snapshot: toClientSnapshot(state, input.now, playerId) },
       { status: 201 },
     );
   }
@@ -222,7 +236,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     this.broadcastSnapshot(state);
 
     return Response.json(
-      { roomCode: state.roomCode, session: { roomCode: state.roomCode, playerId, reconnectToken }, snapshot: toPublicSnapshot(state, now) },
+      { roomCode: state.roomCode, session: { roomCode: state.roomCode, playerId, reconnectToken }, snapshot: toClientSnapshot(state, now, playerId) },
       { status: 201 },
     );
   }
@@ -248,7 +262,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     const state = storedState ? upgradeState(storedState) : undefined;
     assertRoomAvailable(state, now);
     await this.verifySession(state, input);
-    return Response.json({ snapshot: toPublicSnapshot(state, now) });
+    return Response.json({ snapshot: toClientSnapshot(state, now, input.playerId) });
   }
 
   private async acceptWebSocket(url: URL): Promise<Response> {
@@ -311,17 +325,16 @@ export class RoomDurableObject extends DurableObject<Env> {
     if (command.type === "REQUEST_SNAPSHOT") {
       recordProcessedCommand(state, command.commandId, socketPlayerId, now, "accepted");
       await this.ctx.storage.put(STATE_KEY, state);
-      this.send(webSocket, { type: "ROOM_SNAPSHOT", snapshot: toPublicSnapshot(state, now) });
+      this.send(webSocket, { type: "ROOM_SNAPSHOT", snapshot: toClientSnapshot(state, now, socketPlayerId) });
       return this.send(webSocket, { type: "COMMAND_ACCEPTED", commandId: command.commandId, eventSequence: state.eventSequence });
     }
 
     if (command.type === "LEAVE_ROOM") {
-      const result = leavePlayer(state, socketPlayerId, now);
+      leavePlayer(state, socketPlayerId, now);
       if (state.phase === "question" && allRequiredAnswersSubmitted(state)) revealAnswers(state, now);
       recordProcessedCommand(state, command.commandId, socketPlayerId, now, "accepted");
       await this.ctx.storage.put(STATE_KEY, state);
       this.send(webSocket, { type: "COMMAND_ACCEPTED", commandId: command.commandId, eventSequence: state.eventSequence });
-      if (result.hostChanged) this.broadcast({ type: "HOST_CHANGED", hostPlayerId: result.hostPlayerId, eventSequence: state.eventSequence });
       this.broadcastSnapshot(state);
       for (const socket of this.socketsForPlayer(socketPlayerId)) socket.close(1000, "Player left room");
       await this.scheduleNextAlarm(state);
@@ -329,7 +342,11 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
 
     try {
-      if (command.type === "START_GAME") {
+      if (command.type === "SAVE_SETUP") {
+        saveHostSetup(state, socketPlayerId, command.questions, now);
+      } else if (command.type === "LOCK_SETUP") {
+        lockHostSetup(state, socketPlayerId, now);
+      } else if (command.type === "START_GAME") {
         startGame(state, socketPlayerId, now);
       } else if (command.type === "SUBMIT_ANSWER") {
         const shouldReveal = submitAnswer(state, socketPlayerId, command.answer, now);
@@ -337,17 +354,17 @@ export class RoomDurableObject extends DurableObject<Env> {
       } else if (command.type === "ADVANCE_PHASE") {
         if (state.hostPlayerId !== socketPlayerId) throw new GameError("HOST_ONLY", "Only the host can continue.");
         if (!advancePhase(state, now)) throw new GameError("INVALID_PHASE", "The game cannot advance from this screen.");
-      } else if (command.type === "PLAY_AGAIN") {
-        playAgain(state, socketPlayerId, now);
-        state.playAgainCommandIds.push(command.commandId);
-        state.playAgainCommandIds = state.playAgainCommandIds.slice(-32);
+      } else if (command.type === "SET_UP_ANOTHER_GAME") {
+        setUpAnotherGame(state, socketPlayerId, now);
       } else {
         throw new GameError("INVALID_PHASE", "Command is not available right now.");
       }
       recordProcessedCommand(state, command.commandId, socketPlayerId, now, "accepted");
       await this.ctx.storage.put(STATE_KEY, state);
-      this.send(webSocket, { type: "COMMAND_ACCEPTED", commandId: command.commandId, eventSequence: state.eventSequence });
       this.broadcastSnapshot(state);
+      // Deliver the authoritative snapshot before resolving the initiating
+      // command so the next UI action uses the new phaseVersion.
+      this.send(webSocket, { type: "COMMAND_ACCEPTED", commandId: command.commandId, eventSequence: state.eventSequence });
       await this.scheduleNextAlarm(state);
     } catch (error) {
       const code = error instanceof GameError ? error.code : "COMMAND_FAILED";
@@ -393,12 +410,12 @@ export class RoomDurableObject extends DurableObject<Env> {
     try { socket.send(JSON.stringify(message)); } catch { /* closed between lookup and send */ }
   }
 
-  private broadcast(message: ServerMessage): void {
-    for (const socket of this.ctx.getWebSockets()) this.send(socket, message);
-  }
-
   private broadcastSnapshot(state: PrivateRoomState): void {
-    this.broadcast({ type: "ROOM_SNAPSHOT", snapshot: toPublicSnapshot(state, Date.now()) });
+    const now = Date.now();
+    for (const socket of this.ctx.getWebSockets()) {
+      const playerId = this.playerIdForSocket(socket);
+      if (playerId) this.send(socket, { type: "ROOM_SNAPSHOT", snapshot: toClientSnapshot(state, now, playerId) });
+    }
   }
 
   private async deleteExpiredTickets(now: number): Promise<void> {

@@ -1,10 +1,10 @@
-import type { PublicRoomSnapshot } from "../protocol/messages";
+import type { ClientRoomSnapshot } from "../protocol/messages";
 import type { PlayerSession } from "./session";
 
 interface RoomSessionResponse {
   roomCode: string;
   session: PlayerSession;
-  snapshot: PublicRoomSnapshot;
+  snapshot: ClientRoomSnapshot;
 }
 
 export class RoomApiError extends Error {
@@ -41,8 +41,8 @@ export async function createSocketTicket(session: PlayerSession): Promise<string
   return result.ticket;
 }
 
-export async function fetchRoomSnapshot(session: PlayerSession): Promise<PublicRoomSnapshot> {
-  const result = await apiRequest<{ snapshot: PublicRoomSnapshot }>(`/api/rooms/${session.roomCode}/snapshot`, {
+export async function fetchRoomSnapshot(session: PlayerSession): Promise<ClientRoomSnapshot> {
+  const result = await apiRequest<{ snapshot: ClientRoomSnapshot }>(`/api/rooms/${session.roomCode}/snapshot`, {
     playerId: session.playerId,
     reconnectToken: session.reconnectToken,
   });

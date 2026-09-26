@@ -1,6 +1,6 @@
 # SyncUp
 
-Real-time social matching game for 2–8 players. SyncUp includes authoritative room creation and joining, anonymous reconnectable identities, WebSocket synchronization, a 30-second reconnection window, deterministic host transfer, and a complete five-round matching game.
+Real-time "How well do you know the host?" party game for one host and one to seven players. The host creates and locks five question-and-answer pairs. Players guess each locked answer, earning 100 points for an exact normalized match. SyncUp includes authoritative rooms, anonymous reconnectable identities, WebSocket synchronization, and a 30-second reconnection window.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ A normalized six-character code is passed to `ROOMS.idFromName(code)`. Cloudflar
 
 ## Security boundary
 
-`PrivateRoomState` contains answers, normalized values, reconnect-token hashes, and command ledgers. `toPublicSnapshot` constructs client state field-by-field. During the question phase, clients receive the question, server clock, absolute deadline, phase/event versions, public player status, and aggregate submission progress—never raw or normalized answers.
+`PrivateRoomState` contains host answers, player guesses, normalized values, reconnect-token hashes, and command ledgers. `toPublicSnapshot` constructs client state field-by-field. During the question phase, players receive the current question, server clock, absolute deadline, phase/event versions, public player status, and aggregate submission progress. They never receive the host answer, another player's guess, normalized answers, future answers, or reconnect credentials. An authenticated host-only snapshot can include setup drafts or the current locked answer.
 
 ## Local multiplayer
 
@@ -42,7 +42,7 @@ npm run build:worker
 npm run dev
 ```
 
-Open `http://localhost:4173/`. Use a normal window for Player 1 and an incognito/private window for Player 2 so each has independent local session storage.
+Open `http://localhost:4173/`. Use a normal window for the host and an incognito/private window for a player so each has independent local session storage.
 
 The local development runner starts an isolated Cloudflare-compatible Worker/Durable Object test runtime and a Vite UI server. API and WebSocket traffic are proxied through the same origin.
 
@@ -65,6 +65,6 @@ npx wrangler deploy --name syncup-staging
 
 The deployment uses `wrangler.jsonc`, including the `ASSETS` binding, SPA fallback, `ROOMS` Durable Object binding, and SQLite Durable Object migration. Never commit `.dev.vars`, `.env` files, Wrangler local state, or access tokens.
 
-## Current scope
+## Current game flow
 
-The complete Phase 4 game is enabled: host-only start, five unique questions, server-authoritative 45-second answer phases, simultaneous reveal, exact normalized matching, synchronized leaderboards, tied winners, host/fallback progression, and Play Again in the same room.
+The host creates exactly five questions with secret answers, reviews them, and locks the setup. Once at least one player is connected, the host starts the game. Each round uses the next host-created question in order with a server-authoritative 45-second answer phase. The server reveals the current host answer and all guesses simultaneously, awards 100 points per exact normalized match, and publishes a competitor-only leaderboard. The host never competes and is never transferred to another player. After round five, the host can keep the room and connected players while returning everyone to a new blank setup.

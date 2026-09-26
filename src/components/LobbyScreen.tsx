@@ -1,11 +1,11 @@
 import { Check, CircleHelp, Copy, LogOut, Share2, Signal, SignalZero, UserRound, UsersRound, Wifi } from "lucide-react";
 import { useState } from "react";
 import type { ConnectionState } from "../api/useRoomLobby";
-import type { PublicRoomSnapshot } from "../protocol/messages";
+import type { ClientRoomSnapshot } from "../protocol/messages";
 import { HowToPlay } from "./HowToPlay";
 
 interface LobbyScreenProps {
-  snapshot: PublicRoomSnapshot;
+  snapshot: Extract<ClientRoomSnapshot, { phase: "lobby" }>;
   currentPlayerId: string;
   connectionState: ConnectionState;
   onLeave: () => Promise<void>;
@@ -36,7 +36,18 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
   };
   const connectionText = connectionState === "connected" ? "Connected" : connectionState === "offline" ? "Offline" : "Reconnecting";
   const isHost = snapshot.hostPlayerId === currentPlayerId;
-  const canStart = isHost && snapshot.players.length >= 2 && connectionState === "connected";
+  const host = snapshot.players.find((player) => player.playerId === snapshot.hostPlayerId);
+  const competitors = snapshot.players.filter((player) => player.role === "player");
+  const connectedCompetitors = competitors.filter((player) => player.presence === "connected");
+  const canStart = isHost && snapshot.setupStatus === "locked" && connectedCompetitors.length >= 1 && connectionState === "connected";
+  const lobbyHeading = !host ? "Host unavailable" : host.presence === "reconnecting" ? "Host reconnecting" : connectedCompetitors.length < 1 ? "Invite a player" : "Questions locked";
+  const lobbyMessage = !host
+    ? "This game cannot start without the original host. You can leave and join another room."
+    : host.presence === "reconnecting"
+      ? `Waiting up to 30 seconds for ${snapshot.hostName} to reconnect.`
+      : connectedCompetitors.length < 1
+        ? "Share the room code. At least one player must be connected before the game starts."
+        : `${snapshot.hostName}'s five questions and answers are locked.`;
 
   return (
     <main className="game-shell">
@@ -55,8 +66,8 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
       <section className="lobby-layout">
         <div>
           <div className="section-title">
-            <div><p>THE CREW</p><h1>Lobby</h1></div>
-            <span><UsersRound size={17} /> {snapshot.players.length}/8</span>
+            <div><p>GAME READY</p><h1>Lobby</h1></div>
+            <span><UsersRound size={17} /> {connectedCompetitors.length} connected · {competitors.length}/7 joined</span>
           </div>
           <div className="player-list" aria-live="polite">
             {snapshot.players.map((player, index) => (
@@ -70,15 +81,15 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
                 {player.presence === "connected" ? <Check className="ready-check" size={18} aria-label="Connected" /> : <Wifi className="reconnect-icon" size={18} aria-label="Reconnecting" />}
               </article>
             ))}
-            {snapshot.players.length < 8 && <div className="empty-slot">Waiting for more minds to join…</div>}
+            {snapshot.players.length < 8 && <div className="empty-slot">Waiting for more players to join…</div>}
           </div>
         </div>
         <aside className="lobby-aside">
           <UsersRound size={30} aria-hidden="true" />
-          <h2>{snapshot.players.length < 2 ? "Invite a friend" : "Everyone's here?"}</h2>
-          <p>{snapshot.players.length < 2 ? "Share the room code to bring another player into the lobby." : "The room is live and everyone is synchronized."}</p>
+          <h2>{lobbyHeading}</h2>
+          <p>{lobbyMessage}</p>
           <button className="primary-button" type="button" aria-busy={commandBusy} disabled={!canStart || commandBusy} onClick={() => void onStart()}>{commandBusy ? "Starting…" : "Start game"} <span>→</span></button>
-          <small>{!isHost ? "The host will start the game" : snapshot.players.length < 2 ? "At least 2 players are needed" : "5 rounds · 45 seconds each"}</small>
+          <small>{!host ? "The original host was not replaced" : host.presence === "reconnecting" ? "Players are never promoted to host" : !isHost ? `Waiting for ${snapshot.hostName} to start` : connectedCompetitors.length < 1 ? "At least 1 participating player is needed" : "5 rounds · 45 seconds each"}</small>
         </aside>
       </section>
       {showHowTo && <HowToPlay onClose={() => setShowHowTo(false)} />}

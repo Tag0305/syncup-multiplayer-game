@@ -15,15 +15,15 @@ afterEach(() => {
 describe("SyncUp room entry", () => {
   it("requires a nickname before room creation", () => {
     render(<HomeScreen onCreate={vi.fn()} onJoin={vi.fn()} busy={false} error={null} />);
-    expect(screen.getByRole("heading", { name: /match answers.*score together/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /create a room/i })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: /how well do you.*know the host/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create game/i })).toBeDisabled();
   });
 
   it("submits the entered nickname to the real create handler", () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(<HomeScreen onCreate={onCreate} onJoin={vi.fn()} busy={false} error={null} />);
-    fireEvent.change(screen.getByPlaceholderText(/what should we call you/i), { target: { value: "Tagore" } });
-    fireEvent.click(screen.getByRole("button", { name: /create a room/i }));
+    fireEvent.change(screen.getByLabelText(/host name/i), { target: { value: "Tagore" } });
+    fireEvent.click(screen.getByRole("button", { name: /create game/i }));
     expect(onCreate).toHaveBeenCalledWith("Tagore");
   });
 
@@ -31,8 +31,8 @@ describe("SyncUp room entry", () => {
     render(<HomeScreen onCreate={vi.fn()} onJoin={vi.fn()} busy={false} error={null} />);
     fireEvent.click(screen.getByRole("button", { name: /how to play/i }));
     expect(screen.getByRole("dialog", { name: /how to play/i })).toBeInTheDocument();
-    expect(screen.getByText(/2 to 8 people/i)).toBeInTheDocument();
-    expect(screen.getByText(/300 points each/i)).toBeInTheDocument();
+    expect(screen.getByText(/host creates five questions/i)).toBeInTheDocument();
+    expect(screen.getByText(/exact normalized match earns 100 points/i)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: /how to play/i })).not.toBeInTheDocument();
   });
@@ -47,9 +47,11 @@ describe("launch routes and final actions", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: heading, level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SyncUp home" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "/terms");
   });
 
-  it("explains why Play Again is unavailable and offers Exit to Home", () => {
+  it("offers a fresh host setup and Exit to Home without round-only copy", () => {
     const snapshot = {
       phase: "final",
       roomCode: "ABC234",
@@ -60,15 +62,20 @@ describe("launch routes and final actions", () => {
       eventSequence: 20,
       serverNow: Date.now(),
       hostPlayerId: "host",
-      players: [{ playerId: "host", nickname: "Tagore", role: "host", presence: "connected", score: 300 }],
+      hostName: "Tagore",
+      setupStatus: "locked",
+      players: [
+        { playerId: "host", nickname: "Tagore", role: "host", presence: "connected", score: 0 },
+        { playerId: "p1", nickname: "Alex", role: "player", presence: "connected", score: 300 },
+      ],
       phaseEndsAt: null,
-      leaderboard: [{ playerId: "host", nickname: "Tagore", rank: 1, score: 300, roundPoints: 100, presence: "connected" }],
-      winnerPlayerIds: ["host"],
+      leaderboard: [{ playerId: "p1", nickname: "Alex", rank: 1, score: 300, roundPoints: 100, presence: "connected" }],
+      winnerPlayerIds: ["p1"],
     } as Extract<PublicRoomSnapshot, { phase: "final" }>;
     const onExit = vi.fn().mockResolvedValue(undefined);
-    render(<FinalScreen snapshot={snapshot} currentPlayerId="host" commandBusy={false} onReplay={vi.fn()} onExit={onExit} />);
-    expect(screen.getByText("At least 2 players are needed to play again.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /play again/i })).not.toBeInTheDocument();
+    render(<FinalScreen snapshot={snapshot} currentPlayerId="host" commandBusy={false} onNewGame={vi.fn()} onExit={onExit} />);
+    expect(screen.getByRole("button", { name: /set up another game/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no points this round/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /exit to home/i }));
     expect(onExit).toHaveBeenCalledOnce();
   });

@@ -1,10 +1,11 @@
 export const GAME_CONFIG = {
-  minPlayers: 2,
+  minCompetitors: 1,
   maxPlayers: 8,
   totalRounds: 5,
   answerDurationMs: 45_000,
   reconnectGraceMs: 30_000,
   maxAnswerLength: 60,
+  maxQuestionLength: 140,
   roomCodeLength: 6,
   roomMaxLifetimeMs: 24 * 60 * 60 * 1_000,
   revealDurationMs: 8_000,

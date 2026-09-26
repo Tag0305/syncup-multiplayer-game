@@ -15,12 +15,20 @@ export function HowToPlay({ onClose }: { onClose: () => void }) {
       <section className="how-to-card" role="dialog" aria-modal="true" aria-labelledby="how-to-title">
         <button ref={closeRef} className="modal-close" type="button" onClick={onClose} aria-label="Close how to play"><X size={19} /></button>
         <p className="kicker">QUICK RULES</p><h2 id="how-to-title">How to Play</h2>
-        <p>Play with 2 to 8 people for five rounds. Everyone receives the same prompt, and answers stay private until the reveal. There is no single correct answer. Matching answers score points.</p>
-        <div className="score-rules" aria-label="Scoring rules">
-          <span><strong>2 players</strong><em>100 points each</em></span>
-          <span><strong>3 players</strong><em>200 points each</em></span>
-          <span><strong>4+ players</strong><em>300 points each</em></span>
+        <ol className="how-to-steps">
+          <li>The host creates five questions about themselves.</li>
+          <li>The host secretly answers and locks them.</li>
+          <li>Players join with the room code and guess each locked answer.</li>
+          <li>An exact normalized match earns 100 points.</li>
+          <li>After five rounds, the highest score wins.</li>
+        </ol>
+        <div className="rule-example" aria-label="Scoring example">
+          <span>What is the host's favorite food?</span>
+          <strong>Host locked: Biryani</strong>
+          <p>Alex: Biryani <em>+100</em></p>
+          <p>Maya: Pizza <em>0</em></p>
         </div>
+        <p className="how-to-summary">The better you know the host, the more points you score.</p>
       </section>
     </div>
   );

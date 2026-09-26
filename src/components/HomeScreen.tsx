@@ -10,46 +10,51 @@ interface HomeScreenProps {
 }
 
 export function HomeScreen({ onCreate, onJoin, busy, error }: HomeScreenProps) {
-  const [nickname, setNickname] = useState("");
+  const [hostName, setHostName] = useState("");
+  const [playerName, setPlayerName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [showHowTo, setShowHowTo] = useState(false);
 
   const submitJoin = (event: FormEvent) => {
     event.preventDefault();
-    if (nickname.trim() && roomCode.trim().length === 6) void onJoin(nickname.trim(), roomCode.trim().toUpperCase());
+    if (playerName.trim() && roomCode.trim().length === 6) void onJoin(playerName.trim(), roomCode.trim().toUpperCase());
   };
 
   return (
     <main className="home-grid" id="home">
       <section className="intro-panel">
         <div className="eyebrow">MULTIPLAYER PARTY GAME</div>
-        <h1>Match answers.<br /><span>Score together.</span></h1>
-        <p className="lede">Answer the same prompt. Match your friends. Score when your answers sync.</p>
+        <h1>How well do you<br /><span>know the host?</span></h1>
+        <p className="lede">Guess the answers your host already chose. Match them to score. The player who knows the host best after 5 rounds wins.</p>
         <div className="mini-flow" aria-label="How it works">
-          <span><strong>01</strong> Join</span><i /><span><strong>02</strong> Answer</span><i /><span><strong>03</strong> Match</span>
+          <span><strong>01</strong> Host locks answers</span><i /><span><strong>02</strong> Players guess</span><i /><span><strong>03</strong> Score</span>
         </div>
         <button className="text-button how-to-trigger" type="button" onClick={() => setShowHowTo(true)}><CircleHelp size={17} /> How to play</button>
       </section>
 
       <section className="entry-card" aria-labelledby="play-heading">
         <div className="card-heading">
-          <p>READY WHEN YOU ARE</p>
-          <h2 id="play-heading">Enter the room</h2>
+          <p>CREATE A GAME</p>
+          <h2 id="play-heading">Host a room</h2>
         </div>
         <label className="field">
-          <span>Your nickname</span>
-          <input value={nickname} disabled={busy} onChange={(event) => setNickname(event.target.value)} maxLength={20} placeholder="What should we call you?" autoComplete="nickname" />
+          <span>Host name</span>
+          <input value={hostName} disabled={busy} onChange={(event) => setHostName(event.target.value)} maxLength={20} placeholder="Your name" autoComplete="nickname" />
         </label>
 
         {error && <div className="form-error" role="alert">{error}</div>}
 
-        <button className="primary-button" type="button" aria-busy={busy} disabled={!nickname.trim() || busy} onClick={() => void onCreate(nickname.trim())}>
-          {busy ? "Connecting…" : <>Create a room <ArrowRight size={19} /></>}
+        <button className="primary-button" type="button" aria-busy={busy} disabled={!hostName.trim() || busy} onClick={() => void onCreate(hostName.trim())}>
+          {busy ? "Connecting…" : <>Create game <ArrowRight size={19} /></>}
         </button>
 
-        <div className="divider"><span>or join friends</span></div>
+        <div className="divider"><span>JOIN A GAME</span></div>
 
         <form onSubmit={submitJoin}>
+          <label className="field">
+            <span>Nickname</span>
+            <input value={playerName} disabled={busy} onChange={(event) => setPlayerName(event.target.value)} maxLength={20} placeholder="Your name" autoComplete="nickname" />
+          </label>
           <label className="field">
             <span>Room code</span>
             <div className="code-field">
@@ -57,7 +62,7 @@ export function HomeScreen({ onCreate, onJoin, busy, error }: HomeScreenProps) {
             </div>
           </label>
           <p className="field-hint" id="room-hint">Six characters from your host</p>
-          <button className="secondary-button" aria-busy={busy} disabled={!nickname.trim() || roomCode.length !== 6 || busy}>{busy ? "Connecting…" : "Join room"}</button>
+          <button className="secondary-button" aria-busy={busy} disabled={!playerName.trim() || roomCode.length !== 6 || busy}>{busy ? "Connecting…" : "Join game"}</button>
         </form>
         <p className="privacy-note">No account needed. Just pick a name and play.</p>
       </section>

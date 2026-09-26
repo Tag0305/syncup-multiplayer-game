@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientCommand, PublicRoomSnapshot, ServerMessage } from "../protocol/messages";
+import type { ClientCommand, ClientRoomSnapshot, ServerMessage } from "../protocol/messages";
 import { createRoom, createSocketTicket, fetchRoomSnapshot, joinRoom, RoomApiError, socketUrl } from "./room-client";
 import { clearSession, loadSession, saveSession, type PlayerSession } from "./session";
 
@@ -7,7 +7,7 @@ export type ConnectionState = "idle" | "connecting" | "connected" | "reconnectin
 
 export function useRoomLobby() {
   const [session, setSession] = useState<PlayerSession | null>(() => loadSession());
-  const [snapshot, setSnapshot] = useState<PublicRoomSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<ClientRoomSnapshot | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>(session ? "connecting" : "idle");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29,7 +29,7 @@ export function useRoomLobby() {
     return caught instanceof TypeError ? "Could not reach SyncUp. Check your connection and try again." : fallback;
   }, []);
 
-  const acceptSession = useCallback((nextSession: PlayerSession, initialSnapshot: PublicRoomSnapshot) => {
+  const acceptSession = useCallback((nextSession: PlayerSession, initialSnapshot: ClientRoomSnapshot) => {
     saveSession(nextSession);
     leavingRef.current = false;
     setSession(nextSession);
@@ -187,7 +187,7 @@ export function useRoomLobby() {
     setError(null);
   }, [sendCommand]);
 
-  const runGameCommand = useCallback(async (type: "START_GAME" | "ADVANCE_PHASE" | "PLAY_AGAIN") => {
+  const runGameCommand = useCallback(async (type: "LOCK_SETUP" | "START_GAME" | "ADVANCE_PHASE" | "SET_UP_ANOTHER_GAME") => {
     setCommandBusy(true);
     setError(null);
     try { return await sendCommand(type); }
@@ -201,11 +201,20 @@ export function useRoomLobby() {
     finally { setCommandBusy(false); }
   }, [sendCommand]);
 
+  const saveSetup = useCallback(async (questions: Array<{ question: string; answer: string }>) => {
+    setCommandBusy(true);
+    setError(null);
+    try { return await sendCommand("SAVE_SETUP", { questions }); }
+    finally { setCommandBusy(false); }
+  }, [sendCommand]);
+
   return {
     session, snapshot, connectionState, error, busy, commandBusy, create, join, leave,
+    saveSetup,
+    lockSetup: () => runGameCommand("LOCK_SETUP"),
     startGame: () => runGameCommand("START_GAME"),
     advancePhase: () => runGameCommand("ADVANCE_PHASE"),
-    playAgain: () => runGameCommand("PLAY_AGAIN"),
+    setUpAnotherGame: () => runGameCommand("SET_UP_ANOTHER_GAME"),
     submitAnswer,
   };
 }

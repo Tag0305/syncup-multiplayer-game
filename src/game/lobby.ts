@@ -63,12 +63,15 @@ export function createInitialRoomState(args: {
   now: number;
 }): PrivateRoomState {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     roomId: args.roomId,
     roomCode: args.roomCode,
     status: "lobby",
-    phase: "lobby",
+    phase: "setup",
+    originalHostPlayerId: args.creator.playerId,
     hostPlayerId: args.creator.playerId,
+    setupStatus: "editing",
+    hostQuestions: [],
     createdAt: args.now,
     updatedAt: args.now,
     expiresAt: args.now + GAME_CONFIG.roomMaxLifetimeMs,
@@ -78,8 +81,6 @@ export function createInitialRoomState(args: {
     phaseVersion: 0,
     phaseStartedAt: null,
     phaseEndsAt: null,
-    selectedQuestionIds: [],
-    usedQuestionIds: [],
     currentQuestion: null,
     gamePlayerIds: [],
     eligiblePlayerIds: [],
@@ -88,7 +89,6 @@ export function createInitialRoomState(args: {
     roundResults: [],
     processedCommands: {},
     scoredPhaseVersions: [],
-    playAgainCommandIds: [],
     lastRoundPoints: {},
     scheduledTransition: null,
     eventSequence: 1,
@@ -104,7 +104,7 @@ export function assertRoomAvailable(state: PrivateRoomState | undefined, now: nu
 
 export function addPlayer(state: PrivateRoomState, player: PlayerState, now: number): void {
   assertRoomAvailable(state, now);
-  if (state.status !== "lobby" || state.phase !== "lobby") {
+  if (state.status !== "lobby" || (state.phase !== "setup" && state.phase !== "lobby")) {
     throw new LobbyError("GAME_ALREADY_STARTED", "This game is already in progress.");
   }
   const activePlayers = Object.values(state.players).filter((existing) => existing.presence !== "left");
@@ -144,36 +144,19 @@ export function markPlayerDisconnected(state: PrivateRoomState, playerId: string
   return true;
 }
 
-export function chooseNextHost(state: PrivateRoomState): string | null {
-  return (
-    Object.values(state.players)
-      .filter((player) => player.presence === "connected")
-      .sort((a, b) => a.joinOrder - b.joinOrder)[0]?.playerId ?? null
-  );
-}
-
-function assignHost(state: PrivateRoomState, nextHostId: string | null): void {
-  for (const player of Object.values(state.players)) player.role = player.playerId === nextHostId ? "host" : "player";
-  state.hostPlayerId = nextHostId;
-}
-
-export function leavePlayer(state: PrivateRoomState, playerId: string, now: number): { hostChanged: boolean; hostPlayerId: string | null } {
+export function leavePlayer(state: PrivateRoomState, playerId: string, now: number): { hostChanged: false; hostPlayerId: string } {
   const player = state.players[playerId];
   if (!player || player.presence === "left") return { hostChanged: false, hostPlayerId: state.hostPlayerId };
-  const wasHost = state.hostPlayerId === playerId;
   player.presence = "left";
   player.connectionCount = 0;
   player.disconnectedAt = null;
-  player.role = "player";
   state.updatedAt = now;
   state.eventSequence += 1;
-  if (wasHost) assignHost(state, chooseNextHost(state));
-  return { hostChanged: wasHost, hostPlayerId: state.hostPlayerId };
+  return { hostChanged: false, hostPlayerId: state.hostPlayerId };
 }
 
 export function expireDisconnectedPlayers(state: PrivateRoomState, now: number): { changed: boolean; hostChanged: boolean } {
   let changed = false;
-  let hostExpired = false;
   for (const player of Object.values(state.players)) {
     if (
       player.presence === "reconnecting" &&
@@ -183,17 +166,14 @@ export function expireDisconnectedPlayers(state: PrivateRoomState, now: number):
       player.presence = "left";
       player.disconnectedAt = null;
       player.connectionCount = 0;
-      player.role = "player";
       changed = true;
-      if (state.hostPlayerId === player.playerId) hostExpired = true;
     }
   }
-  if (hostExpired) assignHost(state, chooseNextHost(state));
   if (changed) {
     state.updatedAt = now;
     state.eventSequence += 1;
   }
-  return { changed, hostChanged: hostExpired };
+  return { changed, hostChanged: false };
 }
 
 export function nextPresenceDeadline(state: PrivateRoomState): number | null {
