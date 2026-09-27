@@ -1,4 +1,4 @@
-import { useRoomLobby } from "./api/useRoomLobby";
+import { useRoomLobby, type ConnectionState } from "./api/useRoomLobby";
 import { Brand } from "./components/Brand";
 import { HomeScreen } from "./components/HomeScreen";
 import { HostSetupScreen } from "./components/HostSetupScreen";
@@ -16,9 +16,16 @@ function Footer() {
   );
 }
 
+export function connectionNoticeText(connectionState: ConnectionState): string {
+  if (connectionState === "connecting" || connectionState === "idle") return "Connecting to your game…";
+  if (connectionState === "offline") return "You are offline. SyncUp will reconnect when your connection returns.";
+  return "Connection interrupted. Reconnecting to your game…";
+}
+
 function GameApp() {
   const room = useRoomLobby();
   const isRestoring = room.session && !room.snapshot;
+  const connectionNotice = connectionNoticeText(room.connectionState);
 
   return (
     <div className="app-frame">
@@ -42,7 +49,7 @@ function GameApp() {
       {room.session && room.snapshot?.phase === "leaderboard" && <LeaderboardScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onContinue={room.advancePhase} />}
       {room.session && room.snapshot?.phase === "final" && <FinalScreen snapshot={room.snapshot} currentPlayerId={room.session.playerId} commandBusy={room.commandBusy} onNewGame={room.setUpAnotherGame} onExit={room.leave} />}
       {room.session && room.snapshot?.phase !== "lobby" && room.connectionState !== "connected" && (
-        <div className="connection-notice" role="status" aria-live="polite">Connection interrupted. Reconnecting to your game…</div>
+        <div className="connection-notice" role="status" aria-live="polite">{connectionNotice}</div>
       )}
       {room.session && room.error && <div className="game-error" role="alert">{room.error}</div>}
       <Footer />

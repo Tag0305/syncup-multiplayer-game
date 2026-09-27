@@ -34,7 +34,13 @@ export function LobbyScreen({ snapshot, currentPlayerId, connectionState, onLeav
       // Cancelling the native share sheet needs no visible error.
     }
   };
-  const connectionText = connectionState === "connected" ? "Connected" : connectionState === "offline" ? "Offline" : "Reconnecting";
+  const connectionText = connectionState === "connected"
+    ? "Connected"
+    : connectionState === "offline"
+      ? "Offline"
+      : connectionState === "connecting" || connectionState === "idle"
+        ? "Connecting"
+        : "Reconnecting";
   const isHost = snapshot.hostPlayerId === currentPlayerId;
   const host = snapshot.players.find((player) => player.playerId === snapshot.hostPlayerId);
   const competitors = snapshot.players.filter((player) => player.role === "player");

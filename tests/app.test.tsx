@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import App from "../src/App";
+import App, { connectionNoticeText } from "../src/App";
 import { clearSession, loadSession, saveSession } from "../src/api/session";
 import { HomeScreen } from "../src/components/HomeScreen";
 import { HostSetupScreen } from "../src/components/HostSetupScreen";
@@ -36,6 +36,14 @@ describe("SyncUp room entry", () => {
     expect(screen.getByText(/matching accepted answer earns 100 points/i)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: /how to play/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("connection status copy", () => {
+  it("distinguishes an initial connection from a real reconnect", () => {
+    expect(connectionNoticeText("connecting")).toBe("Connecting to your game…");
+    expect(connectionNoticeText("reconnecting")).toBe("Connection interrupted. Reconnecting to your game…");
+    expect(connectionNoticeText("offline")).toBe("You are offline. SyncUp will reconnect when your connection returns.");
   });
 });
 
